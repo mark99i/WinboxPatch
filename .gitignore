@@ -8,6 +8,7 @@ analysis*.md
 # generated build output
 winbox64.v3.43p*.exe
 patched*.exe
+*_impl.bin
 
 # locally available reference builds (verification only, not published)
 winbox64.v3.43-patched*.exe

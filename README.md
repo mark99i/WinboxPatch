@@ -7,12 +7,13 @@ project instead patches the original `winbox64.v3.43.exe` so it keeps working wi
 
 The builds are fully deterministic: the scripts apply **surgical byte patches**
 (v1: 12 patches, 282 bytes, all inside `.text`; v2 adds the `.wbox` section;
-v3 adds three more tweaks) to the original binary and verify every result
+v3 adds three more tweaks; v4 adds two converter blobs assembled from source
+with the real GNU toolchain) and verify every result
 against a known-good SHA-256. Each output is **byte-identical** to the
 community-tested patched build of the corresponding lineage.
 
-This repository currently ships **patch set v1**, **patch set v2** and
-**patch set v3**. The patch pipeline is deterministic and self-verifying, so
+This repository currently ships **patch sets v1 through v4**. The patch
+pipeline is deterministic and self-verifying, so
 if a future RouterOS release breaks WinBox 3.43 again, further patch sets can
 be added the same way as new versions.
 
@@ -22,6 +23,7 @@ be added the same way as new versions.
 | `winbox64.v3.43p1.exe` (patch set v1) | `acfc8034b662cdabd4ead6a590194a2274dc41358f1b0cda71db9a752b2c4ea4` |
 | `winbox64.v3.43p2.exe` (patch set v2) | `8b0bc24fcfdbd7eee6109d4593ad3aedecb4fc28786133acc71ed051c61aea20` |
 | `winbox64.v3.43p3.exe` (patch set v3) | `4c7223fdf60eb4293db413db712aa89a786180eff7074398630dfc21c6f29d6a` |
+| `winbox64.v3.43p4.exe` (patch set v4) | `4b861b5a0508df19b93b888453a1072e94c8feddd760a3a6f7fa864c8b1de1dd` |
 
 ## Screenshot
 
@@ -119,18 +121,54 @@ community patch):
 Trade-offs: same as v2 (unsigned, 2,418,176 bytes); `VS_FIXEDFILEINFO`
 keeps the v2 value, matching the reference build.
 
+## Patch set v4 — bytes/bigbytes value editors
+
+Patch set v4 (`build-patched-v4.py`) is built **on top of patch set v3** and
+restores the two value editors that RouterOS 7.24+ broke (lineage v98 of the
+community patch):
+
+* **`bytes` fields (u32)** — the field that triggered the analysis is
+  *IPv4 → Settings → Fragment Threshold* (see `ANALYSIS-FRAG.md`): the
+  router stopped sending the `bytes` field converter, so WinBox 3.43 shows
+  such fields red and silently discards every edit (the defect affects all
+  writable bytes fields). The patch wires the converter's empty parse/commit
+  slots to a hand-written parser that accepts the WinBox4 grammar
+  (KiB/MiB/GiB/TiB binary, k/M/G/T decimal, bare `B`, empty = 0, clamped
+  to 0xFFFFFFFF).
+* **`bigbytes` fields (u64)** — the Container one: *Container → Shm Size*
+  (see `ANALYSIS-SHM.md`), plus the other 64-bit fields (tmpfs/memory
+  limits, disk file size/offset): the 64-bit variant of the same problem;
+  a separate u64 parser + commit stub restores editing.
+* **Version stamp**: window titles and VERSIONINFO show `3.43.102.98`.
+
+The two converter blobs are **not hardcoded**: their assembly sources
+(`bytes_impl.S`, `bigbytes_impl.S`) are assembled with the real GNU toolchain
+(`as` + `ld -Ttext` + `objcopy`) by `build-blobs.py` into `bytes_impl.bin` /
+`bigbytes_impl.bin`, which `build-patched-v4.py` then loads — run
+`build-blobs.py` first (it needs binutils: preinstalled on Linux/CI, WSL or
+MinGW on Windows). The blobs are not verified separately; the final exe is
+verified as a whole by its SHA-256. The converter bridges and the rest of
+the value-commit chain are left untouched.
+
+Trade-offs: same as v3 (unsigned, 2,418,176 bytes).
+
 ## Build
 
 Requirements: the original `winbox64.v3.43.exe` in the repo root, PowerShell
-(for patch set v1) and Python 3 (for patch sets v2/v3).
+(for patch set v1) and Python 3 (for patch sets v2–v4). Patch set v4
+additionally needs GNU binutils (`as`/`ld`/`objcopy`) for `build-blobs.py`
+(preinstalled on Linux; on Windows use WSL or MinGW-w64) — run it before
+`build-patched-v4.py`.
 
 ```powershell
 ./build-patched-v1.ps1        # -> winbox64.v3.43p1.exe  (compatibility patches only)
 python ./build-patched-v2.py  # -> winbox64.v3.43p2.exe  (v1 + icons + version stamp)
 python ./build-patched-v3.py  # -> winbox64.v3.43p3.exe  (v2 + Win11/Switch/FD fixes)
+python ./build-blobs.py       # assemble bytes/bigbytes converter blobs (GNU as, required for v4)
+python ./build-patched-v4.py  # -> winbox64.v3.43p4.exe  (v3 + bytes/bigbytes editors)
 ```
 
-Patch set v3 takes the v2 output (`winbox64.v3.43p2.exe`) as its input. All
+Each patch set takes the previous output as its input. All
 scripts:
 
 1. verify the input hash (fails on anything but the pristine original);
@@ -141,17 +179,21 @@ scripts:
 ## CI / Releases
 
 `.github/workflows/build-and-release.yml` runs on **every push to `master`**
-(and manually via `workflow_dispatch`): it builds all three patch sets on a
-Windows runner, verifies all SHA-256 hashes, and creates three GitHub Releases
-on the first successful run (existing releases are left untouched — the builds
-are byte-deterministic, so there is nothing to update):
+(and manually via `workflow_dispatch`): it builds all four patch sets on an
+Ubuntu runner — where the real GNU assembler turns `bytes_impl.S` /
+`bigbytes_impl.S` into the v4 converter blobs — verifies all SHA-256
+hashes, and creates four GitHub
+Releases on the first successful run (existing releases are left untouched —
+the builds are byte-deterministic, so there is nothing to update):
 
 * **`patched-v1`** — `WinBox 3.43p1`: `winbox64.v3.43p1.exe` +
   `icons16/24/32.png` (the PNGs must sit next to this exe)
 * **`patched-v2`** — `WinBox 3.43p2`: `winbox64.v3.43p2.exe` only —
   self-contained, icons embedded
-* **`patched-v3`** — `WinBox 3.43p3` (marked *Latest*): `winbox64.v3.43p3.exe`
-  only — self-contained, Win11/Switch/Format Drive fixes
+* **`patched-v3`** — `WinBox 3.43p3`: `winbox64.v3.43p3.exe` only —
+  self-contained, Win11/Switch/Format Drive fixes
+* **`patched-v4`** — `WinBox 3.43p4` (marked *Latest*): `winbox64.v3.43p4.exe`
+  only — self-contained, plus the bytes/bigbytes editor fixes
 
 ## Repository layout
 
@@ -160,9 +202,14 @@ winbox64.v3.43.exe         original MikroTik binary (patch input)
 build-patched-v1.ps1       deterministic patch script (patch set v1)
 build-patched-v2.py        deterministic patch script (patch set v2)
 build-patched-v3.py        deterministic patch script (patch set v3)
+build-patched-v4.py        deterministic patch script (patch set v4)
+build-blobs.py             assembles *_impl.bin from *_impl.S (real GNU as)
+bytes_impl.S               'bytes' (u32) converter source (patch set v4)
+bigbytes_impl.S            'bigbytes' (u64) converter source (patch set v4)
 winbox64.v3.43p1.exe       build output, patch set v1 (generated)
 winbox64.v3.43p2.exe       build output, patch set v2 (generated)
 winbox64.v3.43p3.exe       build output, patch set v3 (generated)
+winbox64.v3.43p4.exe       build output, patch set v4 (generated)
 icons16/24/32.png          icon sets (embedded by v2+; needed on disk for v1)
 screen-p2.png              screenshot of the patched client
 .github/workflows/         CI: build + release

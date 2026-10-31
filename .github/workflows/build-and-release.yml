@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-and-release:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -32,6 +32,14 @@ jobs:
         shell: pwsh
         run: python ./build-patched-v3.py
 
+      - name: Assemble v4 converter blobs (GNU as)
+        shell: bash
+        run: python build-blobs.py
+
+      - name: Patch the binary (patch set v4)
+        shell: pwsh
+        run: python ./build-patched-v4.py
+
       - name: Verify SHA-256
         shell: pwsh
         run: |
@@ -47,9 +55,14 @@ jobs:
           if ($h3 -ne '4c7223fdf60eb4293db413db712aa89a786180eff7074398630dfc21c6f29d6a') {
             throw "patch set v3 SHA-256 mismatch: $h3"
           }
+          $h4 = (Get-FileHash ./winbox64.v3.43p4.exe -Algorithm SHA256).Hash.ToLower()
+          if ($h4 -ne '4b861b5a0508df19b93b888453a1072e94c8feddd760a3a6f7fa864c8b1de1dd') {
+            throw "patch set v4 SHA-256 mismatch: $h4"
+          }
           "Verified v1: $h1"
           "Verified v2: $h2"
           "Verified v3: $h3"
+          "Verified v4: $h4"
 
       - name: Publish GitHub Release (patch set v1)
         shell: pwsh
@@ -115,6 +128,31 @@ jobs:
                    "no files needed next to the exe.`n" +
                    "See the README for details on what each patch does."
           $assets = @('winbox64.v3.43p3.exe')
+          if (gh release view $tag --json name -q '.name') {
+            "Release '$tag' already exists - nothing to do (build is deterministic)"
+          } else {
+            gh release create $tag @assets --title $title --notes $notes
+            if ($LASTEXITCODE -ne 0) { throw "gh release create failed for '$tag'" }
+            "Created release '$tag'"
+          }
+
+      - name: Publish GitHub Release (patch set v4)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag   = 'patched-v4'
+          $title = 'WinBox 3.43p4'
+          $sha   = $env:GITHUB_SHA
+          $notes = "Patch set v4 - v3 + bytes/bigbytes value editor fixes, version stamp 3.43.102.98.`n" +
+                   "Built automatically from commit $sha.`n`n" +
+                   "winbox64.v3.43p4.exe is byte-identical to the known-good community-patched build`n" +
+                   "(SHA-256 4b861b5a0508df19b93b888453a1072e94c8feddd760a3a6f7fa864c8b1de1dd).`n`n" +
+                   "Fixes red, uneditable bytes/bigbytes fields (MTU, Container Shm Size, tmpfs/memory limits, disk sizes) on RouterOS 7.24+.`n`n" +
+                   "Self-contained: icons are embedded and unpacked to %TEMP% at startup -`n" +
+                   "no files needed next to the exe.`n" +
+                   "See the README for details on what each patch does."
+          $assets = @('winbox64.v3.43p4.exe')
           if (gh release view $tag --json name -q '.name') {
             "Release '$tag' already exists - nothing to do (build is deterministic)"
           } else {
