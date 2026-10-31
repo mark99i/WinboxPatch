@@ -25,9 +25,23 @@ be added the same way as new versions.
 | `winbox64.v3.43p3.exe` (patch set v3) | `4c7223fdf60eb4293db413db712aa89a786180eff7074398630dfc21c6f29d6a` |
 | `winbox64.v3.43p4.exe` (patch set v4) | `4b861b5a0508df19b93b888453a1072e94c8feddd760a3a6f7fa864c8b1de1dd` |
 
+## Contents
+
+* [What changed in RouterOS 7.25 and why WinBox 3.43 breaks](#what-changed-in-routeros-725-and-why-winbox-343-breaks)
+* [Patch set v1 — startup compatibility](#patch-set-v1--startup-compatibility)
+* [Patch set v2 — embedded icons + version stamp](#patch-set-v2--embedded-icons--version-stamp)
+* [Patch set v3 — Win11 launch fix + Switch icon + Format Drive guard](#patch-set-v3--win11-launch-fix--switch-icon--format-drive-guard)
+* [Patch set v4 — bytes/bigbytes value editors](#patch-set-v4--bytesbigbytes-value-editors)
+* [Roadmap / TODO](#roadmap--todo)
+* [Build](#build)
+* [CI / Releases](#ci--releases)
+* [Disclaimer](#disclaimer)
+
 ## Screenshot
 
 ![WinBox 3.43p2 running against RouterOS 7.25](screen-p2.png)
+
+![WinBox 3.43p3 running against RouterOS 7.25](screen-p3.png)
 
 ## Credits
 
@@ -51,7 +65,7 @@ The patches below make the frozen WinBox 3 parser tolerant to all of this — th
 approach MikroTik themselves took in WinBox 4.2 ("ignore all RouterOS WinBox file parsing
 errors"), plus a fallback for the dropped `title` fields.
 
-## The patches
+## Patch set v1 — startup compatibility
 
 All offsets are file offsets (`VMA − 0x400C00`); "cave" = hand-written code placed into
 dead assert/log blocks.
@@ -128,15 +142,15 @@ restores the two value editors that RouterOS 7.24+ broke (lineage v98 of the
 community patch):
 
 * **`bytes` fields (u32)** — the field that triggered the analysis is
-  *IPv4 → Settings → Fragment Threshold* (see `ANALYSIS-FRAG.md`): the
+  *IPv4 → Settings → Fragment Threshold*: the
   router stopped sending the `bytes` field converter, so WinBox 3.43 shows
   such fields red and silently discards every edit (the defect affects all
   writable bytes fields). The patch wires the converter's empty parse/commit
   slots to a hand-written parser that accepts the WinBox4 grammar
   (KiB/MiB/GiB/TiB binary, k/M/G/T decimal, bare `B`, empty = 0, clamped
   to 0xFFFFFFFF).
-* **`bigbytes` fields (u64)** — the Container one: *Container → Shm Size*
-  (see `ANALYSIS-SHM.md`), plus the other 64-bit fields (tmpfs/memory
+* **`bigbytes` fields (u64)** — the Container one: *Container → Shm Size*,
+  plus the other 64-bit fields (tmpfs/memory
   limits, disk file size/offset): the 64-bit variant of the same problem;
   a separate u64 parser + commit stub restores editing.
 * **Version stamp**: window titles and VERSIONINFO show `3.43.102.98`.
@@ -195,25 +209,16 @@ the builds are byte-deterministic, so there is nothing to update):
 * **`patched-v4`** — `WinBox 3.43p4` (marked *Latest*): `winbox64.v3.43p4.exe`
   only — self-contained, plus the bytes/bigbytes editor fixes
 
-## Repository layout
+## Roadmap / TODO
 
-```
-winbox64.v3.43.exe         original MikroTik binary (patch input)
-build-patched-v1.ps1       deterministic patch script (patch set v1)
-build-patched-v2.py        deterministic patch script (patch set v2)
-build-patched-v3.py        deterministic patch script (patch set v3)
-build-patched-v4.py        deterministic patch script (patch set v4)
-build-blobs.py             assembles *_impl.bin from *_impl.S (real GNU as)
-bytes_impl.S               'bytes' (u32) converter source (patch set v4)
-bigbytes_impl.S            'bigbytes' (u64) converter source (patch set v4)
-winbox64.v3.43p1.exe       build output, patch set v1 (generated)
-winbox64.v3.43p2.exe       build output, patch set v2 (generated)
-winbox64.v3.43p3.exe       build output, patch set v3 (generated)
-winbox64.v3.43p4.exe       build output, patch set v4 (generated)
-icons16/24/32.png          icon sets (embedded by v2+; needed on disk for v1)
-screen-p2.png              screenshot of the patched client
-.github/workflows/         CI: build + release
-```
+Known remaining issues in the patched client — candidates for a future
+patch set (v5):
+
+* **Container UI bug with `ENV`** — the container element with `ENV`
+  variables renders incorrectly.
+* **Tools → Ping in ARP mode** — does not work against current RouterOS.
+* **CMR component (RouterOS 7.26+)** — new component that WinBox 3.43
+  renders only partially and incorrectly; needs analysis.
 
 ## Disclaimer
 
