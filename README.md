@@ -35,6 +35,7 @@ be added the same way as new versions.
 * [Roadmap / TODO](#roadmap--todo)
 * [Build](#build)
 * [CI / Releases](#ci--releases)
+* [Donations](#donations)
 * [Disclaimer](#disclaimer)
 
 ## Screenshot
@@ -217,8 +218,18 @@ patch set (v5):
 * **Container UI bug with `ENV`** — the container element with `ENV`
   variables renders incorrectly.
 * **Tools → Ping in ARP mode** — does not work against current RouterOS.
+* **WiFi: sends `interworking.realms-raw=""` on save** — saving a WiFi
+  object submits an empty `interworking.realms-raw`.
 * **CMR component (RouterOS 7.26+)** — new component that WinBox 3.43
   renders only partially and incorrectly; needs analysis.
+
+## Donations
+
+If this patch saved you from a forced migration to WinBox 4.x, you can
+support the project:
+
+* **USDT (TRC-20)**: `TWLXmDdmaCEG8URAs3qi1pLitdHWTCHmAj`
+* **Ethereum (ETH / ERC-20)**: `0xd5D9C69d390571FF0d2C166A4Fd384585Ef17F36`
 
 ## Disclaimer
 
