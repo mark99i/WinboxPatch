@@ -5,21 +5,23 @@ RouterOS up to 7.24.x, but **RouterOS 7.25 breaks it**: the client either refuse
 or crashes while loading the interface. MikroTik's answer is "upgrade to WinBox 4.x" — this
 project instead patches the original `winbox64.v3.43.exe` so it keeps working with 7.25.
 
-The build is fully deterministic: a single PowerShell script applies **12 surgical byte
-patches** (282 bytes total, all inside `.text`) to the original binary and verifies the
-result against a known-good SHA-256. The output is **byte-identical** to the community-tested
-patched build.
+The builds are fully deterministic: the scripts apply **surgical byte patches**
+(v1: 12 patches, 282 bytes, all inside `.text`; v2 adds the `.wbox` section;
+v3 adds three more tweaks) to the original binary and verify every result
+against a known-good SHA-256. Each output is **byte-identical** to the
+community-tested patched build of the corresponding lineage.
 
-This repository currently ships **patch set v1** and **patch set v2**. The patch
-pipeline is deterministic and self-verifying, so if a future RouterOS release
-breaks WinBox 3.43 again, further patch sets can be added the same way as new
-versions.
+This repository currently ships **patch set v1**, **patch set v2** and
+**patch set v3**. The patch pipeline is deterministic and self-verifying, so
+if a future RouterOS release breaks WinBox 3.43 again, further patch sets can
+be added the same way as new versions.
 
 | File | SHA-256 |
 |---|---|
 | `winbox64.v3.43.exe` (original, input) | `5b41cf51fd81e8d082687f6b522159cf4aba22e6df8edc486721d4e09507b6e9` |
 | `winbox64.v3.43p1.exe` (patch set v1) | `acfc8034b662cdabd4ead6a590194a2274dc41358f1b0cda71db9a752b2c4ea4` |
 | `winbox64.v3.43p2.exe` (patch set v2) | `8b0bc24fcfdbd7eee6109d4593ad3aedecb4fc28786133acc71ed051c61aea20` |
+| `winbox64.v3.43p3.exe` (patch set v3) | `4c7223fdf60eb4293db413db712aa89a786180eff7074398630dfc21c6f29d6a` |
 
 ## Screenshot
 
@@ -94,17 +96,42 @@ Trade-offs: the file grows from 2,295,976 to 2,418,176 bytes; SmartScreen may
 warn about the unsigned binary. Patch set v1 remains available for anyone who
 prefers the minimal patch and placing the three PNG files next to the exe.
 
+## Patch set v3 — Win11 launch fix + Switch icon + Format Drive guard
+
+Patch set v3 (`build-patched-v3.py`) is built **on top of patch set v2** and
+adds three functional tweaks plus a new version stamp (lineage v83 of the
+community patch):
+
+* **Win11 launch fix**: the `.wbox` entry wrapper gets `sub/add rsp,8`
+  around its frame, so `rsp` is 16-byte aligned at WinAPI calls — without it
+  Windows 11 crashes with `MOVAPS` inside `CreateFileA` during the icon
+  extraction (the PNG-table `lea` disp and the final `jmp` are re-aimed
+  accordingly).
+* **Format Drive NULL-guard** (`.text` cave): a NULL pointer in the
+  Format Drive / Power Cycle dialog path returned garbage and crashed the
+  client; the guard makes it return safely instead.
+* **Switch icon (CHR)**: a 120-byte lazy `getIcon` blob in `.wbox`
+  (basis `0x638300`) with the icon slot re-pointed to it — fixes the empty
+  Switch icon on CHR routers (looks up glyph 24 when the item name is
+  `Switch`, caches the result).
+* **Version stamp**: window titles and VERSIONINFO show `3.43.102.83`.
+
+Trade-offs: same as v2 (unsigned, 2,418,176 bytes); `VS_FIXEDFILEINFO`
+keeps the v2 value, matching the reference build.
+
 ## Build
 
 Requirements: the original `winbox64.v3.43.exe` in the repo root, PowerShell
-(for patch set v1) and Python 3 (for patch set v2).
+(for patch set v1) and Python 3 (for patch sets v2/v3).
 
 ```powershell
-./build-patched-v1.ps1     # -> winbox64.v3.43p1.exe  (compatibility patches only)
+./build-patched-v1.ps1        # -> winbox64.v3.43p1.exe  (compatibility patches only)
 python ./build-patched-v2.py  # -> winbox64.v3.43p2.exe  (v1 + icons + version stamp)
+python ./build-patched-v3.py  # -> winbox64.v3.43p3.exe  (v2 + Win11/Switch/FD fixes)
 ```
 
-Both scripts:
+Patch set v3 takes the v2 output (`winbox64.v3.43p2.exe`) as its input. All
+scripts:
 
 1. verify the input hash (fails on anything but the pristine original);
 2. assert the expected original bytes before **every** write (fails safely on a wrong offset);
@@ -114,15 +141,17 @@ Both scripts:
 ## CI / Releases
 
 `.github/workflows/build-and-release.yml` runs on **every push to `master`**
-(and manually via `workflow_dispatch`): it builds both patch sets on a Windows
-runner, verifies both SHA-256 hashes, and creates two GitHub Releases on the
-first successful run (existing releases are left untouched — the builds are
-byte-deterministic, so there is nothing to update):
+(and manually via `workflow_dispatch`): it builds all three patch sets on a
+Windows runner, verifies all SHA-256 hashes, and creates three GitHub Releases
+on the first successful run (existing releases are left untouched — the builds
+are byte-deterministic, so there is nothing to update):
 
 * **`patched-v1`** — `WinBox 3.43p1`: `winbox64.v3.43p1.exe` +
   `icons16/24/32.png` (the PNGs must sit next to this exe)
-* **`patched-v2`** — `WinBox 3.43p2` (marked *Latest*): `winbox64.v3.43p2.exe`
-  only — self-contained, icons embedded
+* **`patched-v2`** — `WinBox 3.43p2`: `winbox64.v3.43p2.exe` only —
+  self-contained, icons embedded
+* **`patched-v3`** — `WinBox 3.43p3` (marked *Latest*): `winbox64.v3.43p3.exe`
+  only — self-contained, Win11/Switch/Format Drive fixes
 
 ## Repository layout
 
@@ -130,9 +159,11 @@ byte-deterministic, so there is nothing to update):
 winbox64.v3.43.exe         original MikroTik binary (patch input)
 build-patched-v1.ps1       deterministic patch script (patch set v1)
 build-patched-v2.py        deterministic patch script (patch set v2)
+build-patched-v3.py        deterministic patch script (patch set v3)
 winbox64.v3.43p1.exe       build output, patch set v1 (generated)
 winbox64.v3.43p2.exe       build output, patch set v2 (generated)
-icons16/24/32.png          icon sets (embedded by v2; needed on disk for v1)
+winbox64.v3.43p3.exe       build output, patch set v3 (generated)
+icons16/24/32.png          icon sets (embedded by v2+; needed on disk for v1)
 screen-p2.png              screenshot of the patched client
 .github/workflows/         CI: build + release
 ```

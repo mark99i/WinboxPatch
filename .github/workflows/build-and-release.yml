@@ -28,19 +28,28 @@ jobs:
         shell: pwsh
         run: python ./build-patched-v2.py
 
+      - name: Patch the binary (patch set v3)
+        shell: pwsh
+        run: python ./build-patched-v3.py
+
       - name: Verify SHA-256
         shell: pwsh
         run: |
           $h1 = (Get-FileHash ./winbox64.v3.43p1.exe -Algorithm SHA256).Hash.ToLower()
           $h2 = (Get-FileHash ./winbox64.v3.43p2.exe -Algorithm SHA256).Hash.ToLower()
+          $h3 = (Get-FileHash ./winbox64.v3.43p3.exe -Algorithm SHA256).Hash.ToLower()
           if ($h1 -ne 'acfc8034b662cdabd4ead6a590194a2274dc41358f1b0cda71db9a752b2c4ea4') {
             throw "patch set v1 SHA-256 mismatch: $h1"
           }
           if ($h2 -ne '8b0bc24fcfdbd7eee6109d4593ad3aedecb4fc28786133acc71ed051c61aea20') {
             throw "patch set v2 SHA-256 mismatch: $h2"
           }
+          if ($h3 -ne '4c7223fdf60eb4293db413db712aa89a786180eff7074398630dfc21c6f29d6a') {
+            throw "patch set v3 SHA-256 mismatch: $h3"
+          }
           "Verified v1: $h1"
           "Verified v2: $h2"
+          "Verified v3: $h3"
 
       - name: Publish GitHub Release (patch set v1)
         shell: pwsh
@@ -81,6 +90,31 @@ jobs:
                    "no files needed next to the exe.`n" +
                    "See the README for details on what each patch does."
           $assets = @('winbox64.v3.43p2.exe')
+          if (gh release view $tag --json name -q '.name') {
+            "Release '$tag' already exists - nothing to do (build is deterministic)"
+          } else {
+            gh release create $tag @assets --title $title --notes $notes
+            if ($LASTEXITCODE -ne 0) { throw "gh release create failed for '$tag'" }
+            "Created release '$tag'"
+          }
+
+      - name: Publish GitHub Release (patch set v3)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag   = 'patched-v3'
+          $title = 'WinBox 3.43p3'
+          $sha   = $env:GITHUB_SHA
+          $notes = "Patch set v3 - v2 + Win11 launch fix + Switch icon (CHR) + Format Drive crash fix,`n" +
+                   "version stamp 3.43.102.83.`n" +
+                   "Built automatically from commit $sha.`n`n" +
+                   "winbox64.v3.43p3.exe is byte-identical to the known-good community-patched build`n" +
+                   "(SHA-256 4c7223fdf60eb4293db413db712aa89a786180eff7074398630dfc21c6f29d6a).`n`n" +
+                   "Self-contained: icons are embedded and unpacked to %TEMP% at startup -`n" +
+                   "no files needed next to the exe.`n" +
+                   "See the README for details on what each patch does."
+          $assets = @('winbox64.v3.43p3.exe')
           if (gh release view $tag --json name -q '.name') {
             "Release '$tag' already exists - nothing to do (build is deterministic)"
           } else {
