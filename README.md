@@ -1,4 +1,4 @@
-# WinBox 3.43 for RouterOS 7.25 (binary patch)
+# WinBox 3.43 for RouterOS 7.25+ (binary patch)
 
 **WinBox 3.43** is the last release of the classic WinBox 3.x client. It works fine with
 RouterOS up to 7.24.x, but **RouterOS 7.25 breaks it**: the client either refuses to connect
@@ -43,9 +43,9 @@ be added the same way as new versions.
 
 ## Screenshot
 
-![WinBox 3.43p2 running against RouterOS 7.25](screen-p2.png)
-
 ![WinBox 3.43p3 running against RouterOS 7.25](screen-p3.png)
+
+![WinBox 3.43p5 running against RouterOS 7.26](screen-p4-cmr.png)
 
 ## Credits
 
