@@ -8,11 +8,12 @@ project instead patches the original `winbox64.v3.43.exe` so it keeps working wi
 The builds are fully deterministic: the scripts apply **surgical byte patches**
 (v1: 12 patches, 282 bytes, all inside `.text`; v2 adds the `.wbox` section;
 v3 adds three more tweaks; v4 adds two converter blobs assembled from source
-with the real GNU toolchain) and verify every result
+with the real GNU toolchain; v5 adds initial RouterOS 7.26/CMR support) and verify
+every result
 against a known-good SHA-256. Each output is **byte-identical** to the
 community-tested patched build of the corresponding lineage.
 
-This repository currently ships **patch sets v1 through v4**. The patch
+This repository currently ships **patch sets v1 through v5**. The patch
 pipeline is deterministic and self-verifying, so
 if a future RouterOS release breaks WinBox 3.43 again, further patch sets can
 be added the same way as new versions.
@@ -24,6 +25,7 @@ be added the same way as new versions.
 | `winbox64.v3.43p2.exe` (patch set v2) | `8b0bc24fcfdbd7eee6109d4593ad3aedecb4fc28786133acc71ed051c61aea20` |
 | `winbox64.v3.43p3.exe` (patch set v3) | `4c7223fdf60eb4293db413db712aa89a786180eff7074398630dfc21c6f29d6a` |
 | `winbox64.v3.43p4.exe` (patch set v4) | `4b861b5a0508df19b93b888453a1072e94c8feddd760a3a6f7fa864c8b1de1dd` |
+| `winbox64.v3.43p5.exe` (patch set v5) | `84999acf0cc20179ab8e77d0cb16e0cabd4fd756aafcebf946e790cc783016a7` |
 
 ## Contents
 
@@ -32,6 +34,7 @@ be added the same way as new versions.
 * [Patch set v2 — embedded icons + version stamp](#patch-set-v2--embedded-icons--version-stamp)
 * [Patch set v3 — Win11 launch fix + Switch icon + Format Drive guard](#patch-set-v3--win11-launch-fix--switch-icon--format-drive-guard)
 * [Patch set v4 — bytes/bigbytes value editors](#patch-set-v4--bytesbigbytes-value-editors)
+* [Patch set v5 — RouterOS 7.26 / initial CMR support](#patch-set-v5--routeros-726--initial-cmr-support)
 * [Roadmap / TODO](#roadmap--todo)
 * [Build](#build)
 * [CI / Releases](#ci--releases)
@@ -167,13 +170,48 @@ the value-commit chain are left untouched.
 
 Trade-offs: same as v3 (unsigned, 2,418,176 bytes).
 
+## Patch set v5 — RouterOS 7.26 / initial CMR support
+
+Patch set v5 (`build-patched-v5.py`) is built **on top of patch set v4** and
+makes WinBox 3.43 usable against RouterOS 7.26 with the `cmr` package
+installed. Four layers, all inside
+`.text` hooks + `.wbox` caves:
+
+* **CMR table model-unfolding**: RouterOS 7.26+CMR wraps the table
+  properties (`path`, `c:` with the columns) into a `model:{...}` node; the
+  'table' handler only looked for them on the node itself → zero columns →
+  crash (AV `0x47c65e`) right after connect. A hook in the property loop
+  reroutes unknown properties to a cave that unwraps `model` nodes and
+  re-enters the loop head (`path`/`c` keep working natively).
+* **Dashboard NULL-resource guard**: the virtual selector of Dashboard
+  objects returns NULL/dangling; a cave skips the resource read when the
+  selector result is NULL (AV `0x49705b` on opening the CMR Dashboard).
+* **Dashboard child validation**: children fed to the notify loop carry a
+  child-array instead of an `nv::string`; borrowing that garbage string
+  corrupted the heap. The cave validates the string (non-NULL, inner
+  pointer in the heap window, sane length) before the borrow and exits
+  through the function epilogue on failure.
+* **CMR menu icons**: 9 icons rasterized from the webfig 7.26 inline-SVG
+  CSS into cells 48, 49, 52–58 (row 1) of the embedded sprites
+  (`icons16/24/32-cmr.png`); the sprites are replaced in place inside
+  `.wbox` — the new PNGs are smaller, the rest of each zone is
+  zero-padded (the PNG parser stops at IEND; the startup extractor's size
+  table stays valid).
+
+No version-stamp change. Trade-offs:
+same as v4 (unsigned, 2,418,176 bytes).
+
+This is a *stability* fix, not full CMR support: the WinBox 3 parser still
+does not know the CMR field/container types — see the Roadmap.
+
 ## Build
 
 Requirements: the original `winbox64.v3.43.exe` in the repo root, PowerShell
-(for patch set v1) and Python 3 (for patch sets v2–v4). Patch set v4
+(for patch set v1) and Python 3 (for patch sets v2–v5). Patch set v4
 additionally needs GNU binutils (`as`/`ld`/`objcopy`) for `build-blobs.py`
 (preinstalled on Linux; on Windows use WSL or MinGW-w64) — run it before
-`build-patched-v4.py`.
+`build-patched-v4.py`. Patch set v5 needs the CMR sprite sources
+`icons16/24/32-cmr.png` (committed to the repository).
 
 ```powershell
 ./build-patched-v1.ps1        # -> winbox64.v3.43p1.exe  (compatibility patches only)
@@ -181,6 +219,7 @@ python ./build-patched-v2.py  # -> winbox64.v3.43p2.exe  (v1 + icons + version s
 python ./build-patched-v3.py  # -> winbox64.v3.43p3.exe  (v2 + Win11/Switch/FD fixes)
 python ./build-blobs.py       # assemble bytes/bigbytes converter blobs (GNU as, required for v4)
 python ./build-patched-v4.py  # -> winbox64.v3.43p4.exe  (v3 + bytes/bigbytes editors)
+python ./build-patched-v5.py  # -> winbox64.v3.43p5.exe  (v4 + RouterOS 7.26/initial CMR support)
 ```
 
 Each patch set takes the previous output as its input. All
@@ -194,10 +233,10 @@ scripts:
 ## CI / Releases
 
 `.github/workflows/build-and-release.yml` runs on **every push to `master`**
-(and manually via `workflow_dispatch`): it builds all four patch sets on an
+(and manually via `workflow_dispatch`): it builds all five patch sets on an
 Ubuntu runner — where the real GNU assembler turns `bytes_impl.S` /
 `bigbytes_impl.S` into the v4 converter blobs — verifies all SHA-256
-hashes, and creates four GitHub
+hashes, and creates five GitHub
 Releases on the first successful run (existing releases are left untouched —
 the builds are byte-deterministic, so there is nothing to update):
 
@@ -207,21 +246,28 @@ the builds are byte-deterministic, so there is nothing to update):
   self-contained, icons embedded
 * **`patched-v3`** — `WinBox 3.43p3`: `winbox64.v3.43p3.exe` only —
   self-contained, Win11/Switch/Format Drive fixes
-* **`patched-v4`** — `WinBox 3.43p4` (marked *Latest*): `winbox64.v3.43p4.exe`
-  only — self-contained, plus the bytes/bigbytes editor fixes
+* **`patched-v4`** — `WinBox 3.43p4`: `winbox64.v3.43p4.exe` only —
+  self-contained, plus the bytes/bigbytes editor fixes
+* **`patched-v5`** — `WinBox 3.43p5` (marked *Latest*): `winbox64.v3.43p5.exe`
+  only — self-contained, plus RouterOS 7.26/initial CMR support
 
 ## Roadmap / TODO
 
 Known remaining issues in the patched client — candidates for a future
-patch set (v5):
+patch set (v6):
 
 * **Container UI bug with `ENV`** — the container element with `ENV`
   variables renders incorrectly.
 * **Tools → Ping in ARP mode** — does not work against current RouterOS.
 * **WiFi: sends `interworking.realms-raw=""` on save** — saving a WiFi
   object submits an empty `interworking.realms-raw`.
-* **CMR component (RouterOS 7.26+)** — new component that WinBox 3.43
-  renders only partially and incorrectly; needs analysis.
+* **CMR component (RouterOS 7.26+)**:
+  - ~~fix launch crash on cmr package installed~~ fixed in patch set 5
+  - implement full CMR support: the WinBox 3 parser still does not know
+    the CMR field/container types (`slot`, `tags`, `enmbools`, `bargraph`,
+    `query`, `deck`, `topolayout`, `supportmsgid`, `defenum`), so the CMR
+    windows render with a degraded/generic UI — patch set 5 only prevents
+    the crashes.
 
 ## Donations
 

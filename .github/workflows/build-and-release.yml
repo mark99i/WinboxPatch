@@ -40,6 +40,10 @@ jobs:
         shell: pwsh
         run: python ./build-patched-v4.py
 
+      - name: Patch the binary (patch set v5)
+        shell: pwsh
+        run: python ./build-patched-v5.py
+
       - name: Verify SHA-256
         shell: pwsh
         run: |
@@ -59,10 +63,15 @@ jobs:
           if ($h4 -ne '4b861b5a0508df19b93b888453a1072e94c8feddd760a3a6f7fa864c8b1de1dd') {
             throw "patch set v4 SHA-256 mismatch: $h4"
           }
+          $h5 = (Get-FileHash ./winbox64.v3.43p5.exe -Algorithm SHA256).Hash.ToLower()
+          if ($h5 -ne '84999acf0cc20179ab8e77d0cb16e0cabd4fd756aafcebf946e790cc783016a7') {
+            throw "patch set v5 SHA-256 mismatch: $h5"
+          }
           "Verified v1: $h1"
           "Verified v2: $h2"
           "Verified v3: $h3"
           "Verified v4: $h4"
+          "Verified v5: $h5"
 
       - name: Publish GitHub Release (patch set v1)
         shell: pwsh
@@ -153,6 +162,32 @@ jobs:
                    "no files needed next to the exe.`n" +
                    "See the README for details on what each patch does."
           $assets = @('winbox64.v3.43p4.exe')
+          if (gh release view $tag --json name -q '.name') {
+            "Release '$tag' already exists - nothing to do (build is deterministic)"
+          } else {
+            gh release create $tag @assets --title $title --notes $notes
+            if ($LASTEXITCODE -ne 0) { throw "gh release create failed for '$tag'" }
+            "Created release '$tag'"
+          }
+
+      - name: Publish GitHub Release (patch set v5)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag   = 'patched-v5'
+          $title = 'WinBox 3.43p5'
+          $sha   = $env:GITHUB_SHA
+          $notes = "Patch set v5 - v4 + RouterOS 7.26 / initial CMR support, no version-stamp change.`n" +
+                   "Built automatically from commit $sha.`n`n" +
+                   "winbox64.v3.43p5.exe is byte-identical to the known-good community-patched build`n" +
+                   "(SHA-256 84999acf0cc20179ab8e77d0cb16e0cabd4fd756aafcebf946e790cc783016a7).`n`n" +
+                   "Fixes the crash on connect to RouterOS 7.26 with the cmr package installed,`n" +
+                   "the CMR Dashboard crashes, and adds the CMR menu icons.`n`n" +
+                   "Self-contained: icons are embedded and unpacked to %TEMP% at startup -`n" +
+                   "no files needed next to the exe.`n" +
+                   "See the README for details on what each patch does."
+          $assets = @('winbox64.v3.43p5.exe')
           if (gh release view $tag --json name -q '.name') {
             "Release '$tag' already exists - nothing to do (build is deterministic)"
           } else {
