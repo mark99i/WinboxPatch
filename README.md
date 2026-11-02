@@ -8,12 +8,13 @@ project instead patches the original `winbox64.v3.43.exe` so it keeps working wi
 The builds are fully deterministic: the scripts apply **surgical byte patches**
 (v1: 12 patches, 282 bytes, all inside `.text`; v2 adds the `.wbox` section;
 v3 adds three more tweaks; v4 adds two converter blobs assembled from source
-with the real GNU toolchain; v5 adds initial RouterOS 7.26/CMR support) and verify
-every result
-against a known-good SHA-256. Each output is **byte-identical** to the
+with the real GNU toolchain; v5 adds initial RouterOS 7.26/CMR support;
+v6 adds the WiFi realms-raw save fix, the Container ENV TZ-widget fix
+and the ESR usability pack) and verify every
+result against a known-good SHA-256. Each output is **byte-identical** to the
 community-tested patched build of the corresponding lineage.
 
-This repository currently ships **patch sets v1 through v5**. The patch
+This repository currently ships **patch sets v1 through v6**. The patch
 pipeline is deterministic and self-verifying, so
 if a future RouterOS release breaks WinBox 3.43 again, further patch sets can
 be added the same way as new versions.
@@ -26,6 +27,7 @@ be added the same way as new versions.
 | `winbox64.v3.43p3.exe` (patch set v3) | `4c7223fdf60eb4293db413db712aa89a786180eff7074398630dfc21c6f29d6a` |
 | `winbox64.v3.43p4.exe` (patch set v4) | `4b861b5a0508df19b93b888453a1072e94c8feddd760a3a6f7fa864c8b1de1dd` |
 | `winbox64.v3.43p5.exe` (patch set v5) | `84999acf0cc20179ab8e77d0cb16e0cabd4fd756aafcebf946e790cc783016a7` |
+| `winbox64.v3.43p6.exe` (patch set v6) | `bb46e3e83cff5bbb4098aba4e7960cd7bf71bf697ff9a580762c6718206fd256` |
 
 ## Contents
 
@@ -35,6 +37,7 @@ be added the same way as new versions.
 * [Patch set v3 — Win11 launch fix + Switch icon + Format Drive guard](#patch-set-v3--win11-launch-fix--switch-icon--format-drive-guard)
 * [Patch set v4 — bytes/bigbytes value editors](#patch-set-v4--bytesbigbytes-value-editors)
 * [Patch set v5 — RouterOS 7.26 / initial CMR support](#patch-set-v5--routeros-726--initial-cmr-support)
+* [Patch set v6 — WiFi realms-raw + ENV TZ widget + ESR usability set](#patch-set-v6--wifi-realms-raw--env-tz-widget--esr-usability-set)
 * [Roadmap / TODO](#roadmap--todo)
 * [Build](#build)
 * [CI / Releases](#ci--releases)
@@ -52,6 +55,13 @@ be added the same way as new versions.
 This project — the reverse-engineering analysis of the WinBox 3.43 binary, the complete
 patch set, the deterministic build script, the CI pipeline and this documentation —
 was created with the assistance of the AI model **GLM-5.3**.
+
+The **ESR usability set** (patch set v6: Ctrl+wheel zoom, Stats ≥ 10^9 with
+thousands grouping, the `… — RouterOS v<ros> via WinBox` window title,
+Log Entry selection and the filter-value swap fix) originates from the
+community build by **MikroTik Forum** user
+[@teslasystems](https://forum.mikrotik.com/u/teslasystems) — see the topic
+[WinBox v3.43 ESR bugfixes/improvements](https://forum.mikrotik.com/t/winbox-v3-43-esr-bugfixes-improvements/270398).
 
 ## What changed in RouterOS 7.25 and why WinBox 3.43 breaks
 
@@ -204,10 +214,40 @@ same as v4 (unsigned, 2,418,176 bytes).
 This is a *stability* fix, not full CMR support: the WinBox 3 parser still
 does not know the CMR field/container types — see the Roadmap.
 
+## Patch set v6 — WiFi realms-raw + ENV TZ widget + ESR usability set
+
+Patch set v6 (`build-patched-v6.py`) is built **on top of patch set v5** and
+adds three feature layers plus a version stamp (20 byte clusters, 748
+bytes, file size unchanged) — every patch is
+documented ("what it is responsible for") inside the build script:
+
+* **WiFi `interworking.realms-raw`**: saving a WiFi object no
+  longer submits an empty `realms-raw`. A hook in the wire-serializer's array
+  branch reroutes to a `.wbox` stub that skips the node entirely when the
+  value is empty (varnum `0xd00d`); non-empty user values are encoded as before.
+* **Container `ENV`**: the corner TZ widget of the ENV
+  element is hidden, DPI-invariantly — a stub in the geometry setter checks
+  the element's vtable (`0x5a6138`) and a `w*10 < h*7` ratio gate.
+* **ESR usability set** (by **teslasystems** — MikroTik Forum user
+  [@teslasystems](https://forum.mikrotik.com/u/teslasystems); see Credits):
+  * **Ctrl+wheel zoom** in list windows;
+  * **Stats counters ≥ 10^9** — a new CRT-free number converter with
+    thousands grouping replaces the broken sprintf path on Stats;
+  * **window title** shows `… — RouterOS v<ros> via WinBox 3.43.103.04`
+    (the router version in the title tail instead of the client name);
+  * **Log Entry**: `ES_NOHIDESELECTION` on the Message edit — the selection
+    stays visible when the control loses focus;
+  * **filter-value swap fix** — the swap functions are retargeted to a
+    rebased copy in the `.wbox` corridor (out of the startup runtime cells).
+* **Version stamp**: resource ProductVersion/FileVersion → `3.43.103.04`
+  (title pieces via the `2.98`→`3.04` imm32 clusters).
+
+Trade-offs: same as v5 (unsigned, 2,418,176 bytes).
+
 ## Build
 
 Requirements: the original `winbox64.v3.43.exe` in the repo root, PowerShell
-(for patch set v1) and Python 3 (for patch sets v2–v5). Patch set v4
+(for patch set v1) and Python 3 (for patch sets v2–v6). Patch set v4
 additionally needs GNU binutils (`as`/`ld`/`objcopy`) for `build-blobs.py`
 (preinstalled on Linux; on Windows use WSL or MinGW-w64) — run it before
 `build-patched-v4.py`. Patch set v5 needs the CMR sprite sources
@@ -220,6 +260,7 @@ python ./build-patched-v3.py  # -> winbox64.v3.43p3.exe  (v2 + Win11/Switch/FD f
 python ./build-blobs.py       # assemble bytes/bigbytes converter blobs (GNU as, required for v4)
 python ./build-patched-v4.py  # -> winbox64.v3.43p4.exe  (v3 + bytes/bigbytes editors)
 python ./build-patched-v5.py  # -> winbox64.v3.43p5.exe  (v4 + RouterOS 7.26/initial CMR support)
+python ./build-patched-v6.py  # -> winbox64.v3.43p6.exe  (v5 + WiFi/ENV fixes + ESR usability set)
 ```
 
 Each patch set takes the previous output as its input. All
@@ -233,10 +274,10 @@ scripts:
 ## CI / Releases
 
 `.github/workflows/build-and-release.yml` runs on **every push to `master`**
-(and manually via `workflow_dispatch`): it builds all five patch sets on an
+(and manually via `workflow_dispatch`): it builds all six patch sets on an
 Ubuntu runner — where the real GNU assembler turns `bytes_impl.S` /
 `bigbytes_impl.S` into the v4 converter blobs — verifies all SHA-256
-hashes, and creates five GitHub
+hashes, and creates six GitHub
 Releases on the first successful run (existing releases are left untouched —
 the builds are byte-deterministic, so there is nothing to update):
 
@@ -248,19 +289,21 @@ the builds are byte-deterministic, so there is nothing to update):
   self-contained, Win11/Switch/Format Drive fixes
 * **`patched-v4`** — `WinBox 3.43p4`: `winbox64.v3.43p4.exe` only —
   self-contained, plus the bytes/bigbytes editor fixes
-* **`patched-v5`** — `WinBox 3.43p5` (marked *Latest*): `winbox64.v3.43p5.exe`
+* **`patched-v5`** — `WinBox 3.43p5`: `winbox64.v3.43p5.exe`
   only — self-contained, plus RouterOS 7.26/initial CMR support
+* **`patched-v6`** — `WinBox 3.43p6` (marked *Latest*): `winbox64.v3.43p6.exe`
+  only — self-contained, plus the WiFi/ENV fixes and the ESR usability set
 
 ## Roadmap / TODO
 
 Known remaining issues in the patched client — candidates for a future
-patch set (v6):
+patch set (v7):
 
-* **Container UI bug with `ENV`** — the container element with `ENV`
-  variables renders incorrectly.
+* **Container UI bug with `ENV`** — ~~the container element with `ENV`
+  variables renders incorrectly~~ fixed in patch set 6 (corner TZ widget hidden).
 * **Tools → Ping in ARP mode** — does not work against current RouterOS.
-* **WiFi: sends `interworking.realms-raw=""` on save** — saving a WiFi
-  object submits an empty `interworking.realms-raw`.
+* **WiFi: sends `interworking.realms-raw=""` on save** — ~~saving a WiFi
+  object submits an empty `interworking.realms-raw`~~ fixed in patch set 6.
 * **CMR component (RouterOS 7.26+)**:
   - ~~fix launch crash on cmr package installed~~ fixed in patch set 5
   - implement full CMR support: the WinBox 3 parser still does not know
@@ -268,6 +311,16 @@ patch set (v6):
     `query`, `deck`, `topolayout`, `supportmsgid`, `defenum`), so the CMR
     windows render with a degraded/generic UI — patch set 5 only prevents
     the crashes.
+* **Dark theme** — WinBox 3.43 is light-theme only. A dark mode would need
+  a skin/colour-table rework of the built-in UI (the no-skin branch forced
+  by patch v1-#2) or a patched default skin with dark palettes for the
+  window, tree, list and editor controls.
+* **ESR set by teslasystems** (partial — the usable parts are already in
+  patch set v6):
+  - **filter value disable clear** — needs some fixes;
+  - **swap title** — keep or drop? (open question: whether the v6
+    window-title swap `… — RouterOS v<ros> via WinBox 3.43.103.04` is
+    wanted at all).
 
 ## Donations
 
