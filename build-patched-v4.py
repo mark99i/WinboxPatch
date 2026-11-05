@@ -30,13 +30,12 @@ value-commit chain are NOT touched. All zones are disjoint from v3.
 Output: winbox64.v3.43p4.exe, byte-identical to the reference build v98
 (sha256 4b861b5a0508df19b93b888453a1072e94c8feddd760a3a6f7fa864c8b1de1dd).
 
-The two converter blobs are not hardcoded: their assembly sources
+The two converter blobs are assembled by THIS script from their sources
 (bytes_impl.S - the 'bytes' (u32) converter, bigbytes_impl.S - the
 'bigbytes' (u64) converter; both kept verbatim from ANALYSIS-FRAG.md /
-ANALYSIS-SHM.md section G.1) are assembled with the real GNU toolchain
-by build-blobs.py (as + ld -Ttext + objcopy; preinstalled on the CI
-runners, locally available via WSL or MinGW) into bytes_impl.bin /
-bigbytes_impl.bin, which this script loads - run build-blobs.py first.
+ANALYSIS-SHM.md section G.1) with the real GNU toolchain (as + ld -Ttext
++ objcopy - the same pipeline as patch set v7). Requires binutils on PATH:
+preinstalled on the GitHub CI runners; on Windows use WSL or MinGW-w64.
 The blobs are not verified separately: the patched exe is verified as a
 whole by its final SHA-256.
 """
@@ -72,27 +71,47 @@ BRIDGE_OFF = 0x84A22
 BRIDGE_ORIG = bytes.fromhex("80b99800")
 
 # ---------------------------------------------------------------------------
-# The two converter blobs, assembled by build-blobs.py from bytes_impl.S
-# ('bytes', u32) and bigbytes_impl.S ('bigbytes', u64) into bytes_impl.bin
-# and bigbytes_impl.bin next to this script - run build-blobs.py before
-# this one (binutils is preinstalled on the GitHub CI runners; on Windows
-# use WSL or MinGW-w64). The blobs are not verified separately: the final
-# patched exe is checked as a whole by its SHA-256.
+# The two converter blobs, assembled by THIS script from bytes_impl.S
+# ('bytes', u32) and bigbytes_impl.S ('bigbytes', u64) with the real GNU
+# toolchain (as + ld -Ttext + objcopy - the same pipeline as patch set v7).
+# Requires binutils on PATH: preinstalled on the GitHub CI runners; on
+# Windows use WSL or MinGW-w64. The blobs are not verified separately:
+# the patched exe is checked as a whole by its final SHA-256.
 # ---------------------------------------------------------------------------
 import os
+import shutil
+import subprocess
+import tempfile
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+FRAG_SRC = os.path.join(_HERE, "asm", "bytes_impl.S")
+SHM_SRC = os.path.join(_HERE, "asm", "bigbytes_impl.S")
 
-def _load_bin(path, name):
-    """Load a blob assembled by build-blobs.py (no embedded fallback)."""
-    if not os.path.exists(path):
-        print(f"FAIL: {name}: {path} not found - run 'python build-blobs.py' first")
-        sys.exit(1)
-    with open(path, "rb") as f:
-        return f.read()
 
-FRAG_BLOB = _load_bin(os.path.join(_HERE, "bytes_impl.bin"), "bytes")
-SHM_BLOB = _load_bin(os.path.join(_HERE, "bigbytes_impl.bin"), "bigbytes")
+def asm(src, vma, tag, length):
+    """Assemble a converter blob with the real GNU toolchain."""
+    for tool in ("as", "ld", "objcopy"):
+        if shutil.which(tool) is None:
+            die(f"{tool} not found on PATH - install binutils "
+                f"(on Windows: WSL or MinGW-w64)")
+    with tempfile.TemporaryDirectory() as td:
+        obj = os.path.join(td, tag + ".o")
+        elf = os.path.join(td, tag + ".elf")
+        bn = os.path.join(td, tag + ".bin")
+        for args in (["as", "--64", "-o", obj, src],
+                     ["ld", f"-Ttext={vma:#x}", "-e", "_start", "-o", elf, obj]):
+            r = subprocess.run(args, capture_output=True, text=True)
+            if r.returncode:
+                die(f"{tag}: {' '.join(args[:2])} failed: {r.stderr[:300]}")
+        subprocess.run(["objcopy", "-O", "binary", elf, bn], check=True)
+        blob = open(bn, "rb").read()
+    if len(blob) != length:
+        die(f"{tag}: assembled {len(blob):#x} bytes, expected {length:#x}")
+    return blob
+
+
+FRAG_BLOB = asm(FRAG_SRC, 0x657400, "bytes", FRAG_LEN)
+SHM_BLOB = asm(SHM_SRC, 0x638500, "bigbytes", SHM_LEN)
 
 
 def die(m):

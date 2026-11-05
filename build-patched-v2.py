@@ -330,9 +330,9 @@ def main():
                            + struct.pack("<I", 0xE0000020))
 
     # --- Stage 6: .wbox content: extractor + icon sprites ---
-    icons16 = open(os.path.join(HERE, "icons16.png"), "rb").read()
-    icons24 = open(os.path.join(HERE, "icons24.png"), "rb").read()
-    icons32 = open(os.path.join(HERE, "icons32.png"), "rb").read()
+    icons16 = open(os.path.join(HERE, "icons", "icons16.png"), "rb").read()
+    icons24 = open(os.path.join(HERE, "icons", "icons24.png"), "rb").read()
+    icons32 = open(os.path.join(HERE, "icons", "icons32.png"), "rb").read()
     assert (len(icons16), len(icons24), len(icons32)) == (25219, 41114, 56951)
     wbox = bytearray(0x20000)
     wbox[0:472] = build_p1()

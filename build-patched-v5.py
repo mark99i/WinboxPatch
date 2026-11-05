@@ -37,7 +37,8 @@ Input:  winbox64.v3.43p4.exe (patch set v4 = v98, sha256 4b861b5a...)
 Output: winbox64.v3.43p5.exe, byte-identical to the known-good
         community-patched build (sha256 84999acf...).
 
-The sprite sources icons16/24/32-cmr.png must sit next to this script:
+The sprite sources icons16/24/32-cmr.png must sit in the icons/ folder
+next to this script:
 each is the new PNG plus zero padding, exactly the new zone content
 (magic, IEND position and padding are verified below).
 """
@@ -157,7 +158,7 @@ def main():
 
     # --- layer 4: CMR icons (sprite zones replaced in place) ---
     for off, zone, png_len, name in SPRITES:
-        data = open(os.path.join(HERE, name), "rb").read()
+        data = open(os.path.join(HERE, "icons", name), "rb").read()
         if len(data) != zone:
             die(f"{name}: {len(data)} bytes, expected the {zone}-byte zone image")
         if data[:8] != PNG_MAGIC:

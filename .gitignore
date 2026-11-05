@@ -18,3 +18,4 @@ winbox64.v3.43-patched*.exe
 *.log
 Thumbs.db
 Desktop.ini
+__pycache__/

@@ -10,11 +10,13 @@ The builds are fully deterministic: the scripts apply **surgical byte patches**
 v3 adds three more tweaks; v4 adds two converter blobs assembled from source
 with the real GNU toolchain; v5 adds initial RouterOS 7.26/CMR support;
 v6 adds the WiFi realms-raw save fix, the Container ENV TZ-widget fix
-and the ESR usability pack) and verify every
+and the ESR usability pack; v7 adds CMR improvements (the Dashboard
+free-shield and the enmbools/tags type fixes), a dynamic-version
+window title and Ping/Traceroute dialog fields) and verify every
 result against a known-good SHA-256. Each output is **byte-identical** to the
 community-tested patched build of the corresponding lineage.
 
-This repository currently ships **patch sets v1 through v6**. The patch
+This repository currently ships **patch sets v1 through v7**. The patch
 pipeline is deterministic and self-verifying, so
 if a future RouterOS release breaks WinBox 3.43 again, further patch sets can
 be added the same way as new versions.
@@ -28,16 +30,18 @@ be added the same way as new versions.
 | `winbox64.v3.43p4.exe` (patch set v4) | `4b861b5a0508df19b93b888453a1072e94c8feddd760a3a6f7fa864c8b1de1dd` |
 | `winbox64.v3.43p5.exe` (patch set v5) | `84999acf0cc20179ab8e77d0cb16e0cabd4fd756aafcebf946e790cc783016a7` |
 | `winbox64.v3.43p6.exe` (patch set v6) | `bb46e3e83cff5bbb4098aba4e7960cd7bf71bf697ff9a580762c6718206fd256` |
+| `winbox64.v3.43p7.exe` (patch set v7) | `f2e3e610618cbd0d79044d53005a679c421876b886a840c4e5f06febab5ad857` |
 
 ## Contents
 
-* [What changed in RouterOS 7.25 and why WinBox 3.43 breaks](#what-changed-in-routeros-725-and-why-winbox-343-breaks)
+* [What changed in RouterOS 7.25/7.26 and why WinBox 3.43 breaks](#what-changed-in-routeros-725726-and-why-winbox-343-breaks)
 * [Patch set v1 — startup compatibility](#patch-set-v1--startup-compatibility)
 * [Patch set v2 — embedded icons + version stamp](#patch-set-v2--embedded-icons--version-stamp)
 * [Patch set v3 — Win11 launch fix + Switch icon + Format Drive guard](#patch-set-v3--win11-launch-fix--switch-icon--format-drive-guard)
 * [Patch set v4 — bytes/bigbytes value editors](#patch-set-v4--bytesbigbytes-value-editors)
 * [Patch set v5 — RouterOS 7.26 / initial CMR support](#patch-set-v5--routeros-726--initial-cmr-support)
 * [Patch set v6 — WiFi realms-raw + ENV TZ widget + ESR usability set](#patch-set-v6--wifi-realms-raw--env-tz-widget--esr-usability-set)
+* [Patch set v7 — CMR improvements + dynamic title + Ping/Traceroute fields](#patch-set-v7--cmr-improvements--dynamic-title--pingtraceroute-fields)
 * [Roadmap / TODO](#roadmap--todo)
 * [Build](#build)
 * [CI / Releases](#ci--releases)
@@ -57,13 +61,15 @@ patch set, the deterministic build script, the CI pipeline and this documentatio
 was created with the assistance of the AI model **GLM-5.3**.
 
 The **ESR usability set** (patch set v6: Ctrl+wheel zoom, Stats ≥ 10^9 with
-thousands grouping, the `… — RouterOS v<ros> via WinBox` window title,
-Log Entry selection and the filter-value swap fix) originates from the
+thousands grouping, the window-title mechanic (`… — RouterOS v<ros> via
+WinBox …` in v6, since replaced by the own dynamic `… — WinBox <version>`
+tail in patch set v7), Log Entry selection and the filter-value swap fix)
+originates from the
 community build by **MikroTik Forum** user
 [@teslasystems](https://forum.mikrotik.com/u/teslasystems) — see the topic
 [WinBox v3.43 ESR bugfixes/improvements](https://forum.mikrotik.com/t/winbox-v3-43-esr-bugfixes-improvements/270398).
 
-## What changed in RouterOS 7.25 and why WinBox 3.43 breaks
+## What changed in RouterOS 7.25/7.26 and why WinBox 3.43 breaks
 
 * The login reply advertises a minimum WinBox version of **4.3** — the *client* rejects the
   session itself, although the server is still perfectly able to speak the old protocol.
@@ -74,6 +80,26 @@ community build by **MikroTik Forum** user
 * New field types (`bigfixedpoint`, `bignumberrange`), a new conv type (`u32_u32vector`)
   and new constructs in the Power Cycle dialog (id-less `multinumber` field,
   `multicmdsrc` reference-by-slot-number) hit WinBox 3's intentional asserts.
+
+**RouterOS 7.26** (with the `cmr` package installed) adds its own breakage —
+again not a protocol change, but UI-model constructs the frozen WinBox 3
+parser cannot digest, so the *original* client crashes or renders a degraded
+UI against 7.26:
+
+* Table properties (`path`, the `c:` with the columns) are wrapped into a
+  `model:{…}` node; the 'table' handler only looks for them on the node
+  itself → zero columns → a NULL-array clone crash right after connect.
+* The virtual selector of Dashboard objects returns NULL/dangling pointers
+  → crash on opening the CMR Dashboard.
+* Children fed to the notify loop carry a child-array where WinBox 3
+  expects an `nv::string` → borrowing that garbage string corrupts the heap.
+* New CMR field/container types (`slot`, `tags`, `enmbools`, `bargraph`,
+  `query`, `deck`, `topolayout`, `supportmsgid`, `defenum`) are unknown to
+  the WinBox 3 parser → intentional asserts / degraded generic rendering
+  (`enmbools` and `tags` are handled properly since patch set v7, the rest
+  still render generically).
+* The CMR menus come with their own icon set, unknown to the embedded
+  sprite tables.
 
 The patches below make the frozen WinBox 3 parser tolerant to all of this — the same
 approach MikroTik themselves took in WinBox 4.2 ("ignore all RouterOS WinBox file parsing
@@ -107,7 +133,8 @@ development series into one deterministic build step, `build-patched-v2.py`):
 
 * **New RWX section `.wbox`** (RVA `0x238000`, 0x20000 bytes, appended after
   `.reloc`) holding a 472-byte startup extractor and the three icon sprites
-  (`icons16/24/32.png`, byte-identical to the RouterOS 7.24.5 webfig files).
+  (`icons/icons16/24/32.png`, byte-identical to the RouterOS 7.24.5 webfig
+  files).
 * **Startup icon extraction**: `AddressOfEntryPoint` is redirected to the
   extractor. Before the original `mainCRTStartup` runs, it unpacks the three
   PNGs to `%TEMP%\icons16/24/32.png` (plain KERNEL32 calls:
@@ -170,10 +197,9 @@ community patch):
 * **Version stamp**: window titles and VERSIONINFO show `3.43.102.98`.
 
 The two converter blobs are **not hardcoded**: their assembly sources
-(`bytes_impl.S`, `bigbytes_impl.S`) are assembled with the real GNU toolchain
-(`as` + `ld -Ttext` + `objcopy`) by `build-blobs.py` into `bytes_impl.bin` /
-`bigbytes_impl.bin`, which `build-patched-v4.py` then loads — run
-`build-blobs.py` first (it needs binutils: preinstalled on Linux/CI, WSL or
+(kept in the `asm/` folder) are assembled with the real GNU toolchain
+(`as` + `ld -Ttext` + `objcopy`) by `build-patched-v4.py` itself — the same
+pipeline as patch set v7 (it needs binutils: preinstalled on Linux/CI, WSL or
 MinGW on Windows). The blobs are not verified separately; the final exe is
 verified as a whole by its SHA-256. The converter bridges and the rest of
 the value-commit chain are left untouched.
@@ -203,7 +229,7 @@ installed. Four layers, all inside
   through the function epilogue on failure.
 * **CMR menu icons**: 9 icons rasterized from the webfig 7.26 inline-SVG
   CSS into cells 48, 49, 52–58 (row 1) of the embedded sprites
-  (`icons16/24/32-cmr.png`); the sprites are replaced in place inside
+  (`icons/icons16/24/32-cmr.png`); the sprites are replaced in place inside
   `.wbox` — the new PNGs are smaller, the rest of each zone is
   zero-padded (the PNG parser stops at IEND; the startup extractor's size
   table stays valid).
@@ -244,29 +270,85 @@ documented ("what it is responsible for") inside the build script:
 
 Trade-offs: same as v5 (unsigned, 2,418,176 bytes).
 
+## Patch set v7 — CMR improvements + dynamic title + Ping/Traceroute fields
+
+Patch set v7 (`build-patched-v7.py`) is built **on top of patch set v6** and
+adds seven patch steps plus the final version stamp. All new caves are
+assembled from the cave sources in the `asm/` folder with the real GNU
+toolchain — the same pipeline as the v4 converter blobs:
+
+* **`.wbox` grows by 64KB** (SizeOfImage `0x258000`→`0x268000`,
+  VirtualSize/RawSize `0x20000`→`0x30000`; new free zone VA
+  `0x658000`–`0x668000`).
+* **CMR improvements — Dashboard free-shield** (68B cave at
+  `0x658000`): the hook at `0x4CF0DA` validates the CRT allocation header at
+  `[buf-8]` before `free` — the confirmed Dashboard crash fix. The v5 layer-3
+  child-validation hook is retired (restored to pristine bytes): the
+  free-shield handles the Dashboard properly.
+* **Fixed a patch set 5 regression — disappearing fields**: the v5 layer-3
+  child-validation hook skipped dialog children that failed its string
+  check, which made the `Check For Updates` field in System → Packages and
+  the `repull`/`save` fields in Container disappear. Retiring the hook
+  (step 2) eliminates the regression.
+* **Window title, rebuilt on toggle** (782B cave at
+  `0x65B07E`, four retarget hooks) — the esr5 "Swap title order" mechanic.
+* **Dynamic-version window title** (145B cave at
+  `0x657C00`): replaces the previous title-tail mechanic at hook `0x4B49F8`;
+  the `" - WinBox "` prefix is static and the version is read from the PE
+  title on every call, so the window title always matches the stamped
+  version.
+* **Ping/Traceroute dialog fields + CMR types** (cave at
+  `0x65B400`, hook `0x4B7A17` `fopen`): restores the `Interface`/`VRF`
+  fields in the Ping and Traceroute dialogs of `roteros.jg` — fields
+  MikroTik themselves dropped already in RouterOS 7.2x, so the original
+  client lost them too (General:
+  Ping To → Interface → VRF → ARP Ping…), applies the CMR type fixes to
+  `cmr.jg` (drop-`enmbools` → unwrap-`tag` → `tags`-to-multi), closes the
+  read handle before writing (sharing-violation fix) and gates every
+  injection by scanning the dialog zone, so fields are never duplicated.
+  The stab data at `0x65CE00` (340B from `icons/cmr_icons.bin` — the CMR-mechanics
+  markers/templates, incl. the Dashboard icons) is restored after the stab
+  code, which is what keeps the CMR icons working.
+* **Version stamp**: `3.43.103.04` → `3.43.103.63` (8 bytes) and then the
+  integrated `setversion()` stamps the final **`3.43.103.77`** — the ANSI
+  titles plus the UTF-16 FileVersion/ProductVersion fields; the window
+  title syncs automatically (the step-5 cave reads the PE title on every
+  call).
+* **Internal build testing under strict PageHeap**: the builds are
+  smoke-tested internally with full-page heap verification enabled via the
+  Image File Execution Options registry flags
+  (`"GlobalFlag"=dword:02000000`, `"PageHeapFlags"=dword:00000003`) —
+  heap corruptions, overruns and frees of invalid blocks surface
+  immediately instead of staying silent.
+
+Trade-offs: unsigned, 2,483,712 bytes (the file grows by 64KB); needs GNU
+binutils to build. The icon mechanics stay byte-identical to v6 (verified).
+
 ## Build
 
 Requirements: the original `winbox64.v3.43.exe` in the repo root, PowerShell
-(for patch set v1) and Python 3 (for patch sets v2–v6). Patch set v4
-additionally needs GNU binutils (`as`/`ld`/`objcopy`) for `build-blobs.py`
-(preinstalled on Linux; on Windows use WSL or MinGW-w64) — run it before
-`build-patched-v4.py`. Patch set v5 needs the CMR sprite sources
-`icons16/24/32-cmr.png` (committed to the repository).
+(for patch set v1) and Python 3 (for patch sets v2–v7). Patch sets v4 and
+v7 additionally need GNU binutils (`as`/`ld`/`objcopy`, preinstalled on
+Linux; on Windows use WSL or MinGW-w64): both assemble their cave/converter
+blobs from the sources in the `asm/` folder themselves (v7 also loads the
+340B `icons/cmr_icons.bin` stab data). Patch set v5 needs the CMR sprite sources
+`icons/icons16/24/32-cmr.png` (committed to the repository).
 
 ```powershell
 ./build-patched-v1.ps1        # -> winbox64.v3.43p1.exe  (compatibility patches only)
 python ./build-patched-v2.py  # -> winbox64.v3.43p2.exe  (v1 + icons + version stamp)
 python ./build-patched-v3.py  # -> winbox64.v3.43p3.exe  (v2 + Win11/Switch/FD fixes)
-python ./build-blobs.py       # assemble bytes/bigbytes converter blobs (GNU as, required for v4)
 python ./build-patched-v4.py  # -> winbox64.v3.43p4.exe  (v3 + bytes/bigbytes editors)
 python ./build-patched-v5.py  # -> winbox64.v3.43p5.exe  (v4 + RouterOS 7.26/initial CMR support)
 python ./build-patched-v6.py  # -> winbox64.v3.43p6.exe  (v5 + WiFi/ENV fixes + ESR usability set)
+python ./build-patched-v7.py  # -> winbox64.v3.43p7.exe  (v6 + CMR improvements + dynamic title + Ping fields)
 ```
 
 Each patch set takes the previous output as its input. All
 scripts:
 
-1. verify the input hash (fails on anything but the pristine original);
+1. verify the input hash (fails on anything but the expected base — the
+   pristine original for v1/v2, the previous patch set's output for v3–v7);
 2. assert the expected original bytes before **every** write (fails safely on a wrong offset);
 3. apply their patches;
 4. verify the output hash and write the result.
@@ -274,10 +356,10 @@ scripts:
 ## CI / Releases
 
 `.github/workflows/build-and-release.yml` runs on **every push to `master`**
-(and manually via `workflow_dispatch`): it builds all six patch sets on an
-Ubuntu runner — where the real GNU assembler turns `bytes_impl.S` /
-`bigbytes_impl.S` into the v4 converter blobs — verifies all SHA-256
-hashes, and creates six GitHub
+(and manually via `workflow_dispatch`): it builds all seven patch sets on an
+Ubuntu runner — where the real GNU assembler assembles the cave/converter
+sources from the `asm/` folder — verifies all SHA-256
+hashes, and creates seven GitHub
 Releases on the first successful run (existing releases are left untouched —
 the builds are byte-deterministic, so there is nothing to update):
 
@@ -291,36 +373,33 @@ the builds are byte-deterministic, so there is nothing to update):
   self-contained, plus the bytes/bigbytes editor fixes
 * **`patched-v5`** — `WinBox 3.43p5`: `winbox64.v3.43p5.exe`
   only — self-contained, plus RouterOS 7.26/initial CMR support
-* **`patched-v6`** — `WinBox 3.43p6` (marked *Latest*): `winbox64.v3.43p6.exe`
+* **`patched-v6`** — `WinBox 3.43p6`: `winbox64.v3.43p6.exe`
   only — self-contained, plus the WiFi/ENV fixes and the ESR usability set
+* **`patched-v7`** — `WinBox 3.43p7` (marked *Latest*): `winbox64.v3.43p7.exe`
+  only — self-contained, plus the CMR improvements, the dynamic-version
+  title and the Ping/Traceroute dialog fields
 
 ## Roadmap / TODO
 
 Known remaining issues in the patched client — candidates for a future
-patch set (v7):
+patch set (v8):
 
-* **Container UI bug with `ENV`** — ~~the container element with `ENV`
-  variables renders incorrectly~~ fixed in patch set 6 (corner TZ widget hidden).
-* **Tools → Ping in ARP mode** — does not work against current RouterOS.
-* **WiFi: sends `interworking.realms-raw=""` on save** — ~~saving a WiFi
-  object submits an empty `interworking.realms-raw`~~ fixed in patch set 6.
 * **CMR component (RouterOS 7.26+)**:
-  - ~~fix launch crash on cmr package installed~~ fixed in patch set 5
-  - implement full CMR support: the WinBox 3 parser still does not know
-    the CMR field/container types (`slot`, `tags`, `enmbools`, `bargraph`,
-    `query`, `deck`, `topolayout`, `supportmsgid`, `defenum`), so the CMR
-    windows render with a degraded/generic UI — patch set 5 only prevents
-    the crashes.
+  - implement the `bargraph` field type;
+  - implement `topolayout` (not implemented even in WinBox 4 as of
+    2026-11-05);
+  - implement WinBox 4-style filter icons;
+  - verify in a real environment.
 * **Dark theme** — WinBox 3.43 is light-theme only. A dark mode would need
   a skin/colour-table rework of the built-in UI (the no-skin branch forced
   by patch v1-#2) or a patched default skin with dark palettes for the
   window, tree, list and editor controls.
-* **ESR set by teslasystems** (partial — the usable parts are already in
-  patch set v6):
-  - **filter value disable clear** — needs some fixes;
-  - **swap title** — keep or drop? (open question: whether the v6
-    window-title swap `… — RouterOS v<ros> via WinBox 3.43.103.04` is
-    wanted at all).
+* **filter value disable / clear** (from the teslasystems ESR set) — needs
+  some fixes (the rebased filter-value swap corridor from patch set 6 does
+  not fully handle the disable/clear interaction yet).
+* **256×256 application icon** — integrate a 256×256 icon as the
+  application icon (the original WinBox 3.43 ships only up to 48×48, which
+  looks blurry at modern high-DPI Explorer/taskbar sizes).
 
 ## Donations
 

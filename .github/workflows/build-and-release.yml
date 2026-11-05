@@ -32,10 +32,6 @@ jobs:
         shell: pwsh
         run: python ./build-patched-v3.py
 
-      - name: Assemble v4 converter blobs (GNU as)
-        shell: bash
-        run: python build-blobs.py
-
       - name: Patch the binary (patch set v4)
         shell: pwsh
         run: python ./build-patched-v4.py
@@ -47,6 +43,10 @@ jobs:
       - name: Patch the binary (patch set v6)
         shell: pwsh
         run: python ./build-patched-v6.py
+
+      - name: Patch the binary (patch set v7)
+        shell: pwsh
+        run: python ./build-patched-v7.py
 
       - name: Verify SHA-256
         shell: pwsh
@@ -75,12 +75,17 @@ jobs:
           if ($h6 -ne 'bb46e3e83cff5bbb4098aba4e7960cd7bf71bf697ff9a580762c6718206fd256') {
             throw "patch set v6 SHA-256 mismatch: $h6"
           }
+          $h7 = (Get-FileHash ./winbox64.v3.43p7.exe -Algorithm SHA256).Hash.ToLower()
+          if ($h7 -ne 'f2e3e610618cbd0d79044d53005a679c421876b886a840c4e5f06febab5ad857') {
+            throw "patch set v7 SHA-256 mismatch: $h7"
+          }
           "Verified v1: $h1"
           "Verified v2: $h2"
           "Verified v3: $h3"
           "Verified v4: $h4"
           "Verified v5: $h5"
           "Verified v6: $h6"
+          "Verified v7: $h7"
 
       - name: Publish GitHub Release (patch set v1)
         shell: pwsh
@@ -96,7 +101,7 @@ jobs:
                    "(SHA-256 acfc8034b662cdabd4ead6a590194a2274dc41358f1b0cda71db9a752b2c4ea4).`n`n" +
                    "Place icons16/24/32.png next to the exe so WinBox can find its icons.`n" +
                    "See the README for details on what each patch does."
-          $assets = @('winbox64.v3.43p1.exe', 'icons16.png', 'icons24.png', 'icons32.png')
+          $assets = @('winbox64.v3.43p1.exe', 'icons/icons16.png', 'icons/icons24.png', 'icons/icons32.png')
           if (gh release view $tag --json name -q '.name') {
             "Release '$tag' already exists - nothing to do (build is deterministic)"
           } else {
@@ -224,9 +229,34 @@ jobs:
           if (gh release view $tag --json name -q '.name') {
             "Release '$tag' already exists - nothing to do (build is deterministic)"
           } else {
+            gh release create $tag @assets --title $title --notes $notes
+            if ($LASTEXITCODE -ne 0) { throw "gh release create failed for '$tag' (v6)" }
+            "Created release '$tag'"
+          }
+
+
+
+      - name: Publish GitHub Release (patch set v7)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag   = 'patched-v7'
+          $title = 'WinBox 3.43p7'
+          $sha   = $env:GITHUB_SHA
+          $notes = "Patch set v7 - v6 + CMR improvements (Dashboard free-shield, enmbools/tags type fixes), dynamic-version window title, Ping/Traceroute dialog fields (dropped by MikroTik already in RouterOS 7.2x), fixed the patch set 5 disappearing-fields regression (Check For Updates in System/Packages, repull/save in Container), version stamp 3.43.103.77.`n" +
+                   "Built automatically from commit $sha.`n`n" +
+                   "winbox64.v3.43p7.exe is byte-identical to the known-good community-patched build`n" +
+                   "(SHA-256 f2e3e610618cbd0d79044d53005a679c421876b886a840c4e5f06febab5ad857).`n`n" +
+                   "Self-contained: icons are embedded and unpacked to %TEMP% at startup -`n" +
+                   "no files needed next to the exe.`n" +
+                   "See the README for details on what each patch does."
+          $assets = @('winbox64.v3.43p7.exe')
+          if (gh release view $tag --json name -q '.name') {
+            "Release '$tag' already exists - nothing to do (build is deterministic)"
+          } else {
             gh release create $tag @assets --latest --title $title --notes $notes
             if ($LASTEXITCODE -ne 0) { throw "gh release create failed for '$tag'" }
             "Created release '$tag'"
           }
-
 
