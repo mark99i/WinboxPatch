@@ -5,18 +5,19 @@ RouterOS up to 7.24.x, but **RouterOS 7.25 breaks it**: the client either refuse
 or crashes while loading the interface. MikroTik's answer is "upgrade to WinBox 4.x" — this
 project instead patches the original `winbox64.v3.43.exe` so it keeps working with 7.25.
 
-The builds are fully deterministic: the scripts apply **surgical byte patches**
-(v1: 12 patches, 282 bytes, all inside `.text`; v2 adds the `.wbox` section;
+The builds are fully deterministic: the scripts apply **surgical byte patches** —
+v1: 12 patches, 282 bytes, all inside `.text`; v2 adds the `.wbox` section;
 v3 adds three more tweaks; v4 adds two converter blobs assembled from source
 with the real GNU toolchain; v5 adds initial RouterOS 7.26/CMR support;
 v6 adds the WiFi realms-raw save fix, the Container ENV TZ-widget fix
 and the ESR usability pack; v7 adds CMR improvements (the Dashboard
 free-shield and the enmbools/tags type fixes), a dynamic-version
-window title and Ping/Traceroute dialog fields) and verify every
+window title and Ping/Traceroute dialog fields; v8 adds the NTP/Range
+field display and the Num Set → Apply fix — and verify every
 result against a known-good SHA-256. Each output is **byte-identical** to the
 community-tested patched build of the corresponding lineage.
 
-This repository currently ships **patch sets v1 through v7**. The patch
+This repository currently ships **patch sets v1 through v8**. The patch
 pipeline is deterministic and self-verifying, so
 if a future RouterOS release breaks WinBox 3.43 again, further patch sets can
 be added the same way as new versions.
@@ -31,6 +32,7 @@ be added the same way as new versions.
 | `winbox64.v3.43p5.exe` (patch set v5) | `84999acf0cc20179ab8e77d0cb16e0cabd4fd756aafcebf946e790cc783016a7` |
 | `winbox64.v3.43p6.exe` (patch set v6) | `bb46e3e83cff5bbb4098aba4e7960cd7bf71bf697ff9a580762c6718206fd256` |
 | `winbox64.v3.43p7.exe` (patch set v7) | `f2e3e610618cbd0d79044d53005a679c421876b886a840c4e5f06febab5ad857` |
+| `winbox64.v3.43p8.exe` (patch set v8) | `665f7420baf57ece3d5382f446e1d57b4e4a76e751d51552eb96024c2df11fff` |
 
 ## Contents
 
@@ -42,6 +44,7 @@ be added the same way as new versions.
 * [Patch set v5 — RouterOS 7.26 / initial CMR support](#patch-set-v5--routeros-726--initial-cmr-support)
 * [Patch set v6 — WiFi realms-raw + ENV TZ widget + ESR usability set](#patch-set-v6--wifi-realms-raw--env-tz-widget--esr-usability-set)
 * [Patch set v7 — CMR improvements + dynamic title + Ping/Traceroute fields](#patch-set-v7--cmr-improvements--dynamic-title--pingtraceroute-fields)
+* [Patch set v8 — Win7 launch + NTP/Range display + Apply fix + heap shield](#patch-set-v8--win7-launch--ntprange-display--apply-fix--heap-shield)
 * [Roadmap / TODO](#roadmap--todo)
 * [Build](#build)
 * [CI / Releases](#ci--releases)
@@ -79,7 +82,8 @@ community build by **MikroTik Forum** user
   WinBox 3 calls `strlen(NULL)` in three different places.
 * New field types (`bigfixedpoint`, `bignumberrange`), a new conv type (`u32_u32vector`)
   and new constructs in the Power Cycle dialog (id-less `multinumber` field,
-  `multicmdsrc` reference-by-slot-number) hit WinBox 3's intentional asserts.
+  `multicmdsrc` reference-by-slot-number) hit WinBox 3's intentional asserts
+  (the new field types are displayed properly since patch set v8).
 
 **RouterOS 7.26** (with the `cmr` package installed) adds its own breakage —
 again not a protocol change, but UI-model constructs the frozen WinBox 3
@@ -324,12 +328,46 @@ toolchain — the same pipeline as the v4 converter blobs:
 Trade-offs: unsigned, 2,483,712 bytes (the file grows by 64KB); needs GNU
 binutils to build. The icon mechanics stay byte-identical to v6 (verified).
 
+## Patch set v8 — Win7 launch + NTP/Range display + Apply fix + heap shield
+
+Patch set v8 (`build-patched-v8.py`) is built **on top of patch set v7** and
+adds five components plus a version stamp (version **3.43.104.1**, file
+size unchanged). The new caves are assembled from the `.s` sources in the
+`asm/` folder:
+
+* **Win7 launch fix** — Win7 has no `GetDpiForWindow`. The fallback return
+  site is re-aimed at a tiny helper that arms a marker; a bridge in the
+  host function takes the fallback path **only when the marker is armed** —
+  on Win10 the fallback is unreachable, so the behavior stays stock there.
+* **NTP/Range field display** — RouterOS 7.25+ sends fields of the new
+  types `bigfixedpoint` (NTP Time/Offset/Delay…) and `bignumberrange`;
+  the stock parser skips them, leaving the dialogs empty. The cave masks
+  the type names to ones the client knows (`bigfixedpoint`→`bignumber`,
+  `bignumberrange`→`numberrange`) before parsing — the fields render.
+* **Num Set → Apply fix** — Apply rejects Range input on 7.25+ ("num range
+  not specified"). The cave keeps a transformed **in-memory image** of
+  `roteros.jg` (Range: `bignumberrange` → a tuple of two `bignumber`,
+  idempotent; the on-disk file is never touched) and serves it through
+  `fopen`/`fread`/`fseek`/`fclose` interception, with a strict
+  roteros.jg-path handle gate cleared on `fclose` (msvcrt reuses `FILE*`
+  structs — without the clearing the icon sprites and foreign jg files
+  would receive foreign data).
+* **Stronger heap shield** — replaces the v7 free-shield's badsize check
+  (a leak source) with pure address checks plus a parse-arena signature,
+  and adds **double-free protection** for the Dashboard
+  element builder: three dedup caves check the target against a ring of
+  recent frees with fresh stamps (an instant burst = a true double-free
+  → skip; a stale stamp = the block was reallocated → a legit free).
+* **Version stamp**: `3.43.103.77` → `3.43.104.1`.
+
+Trade-offs: unsigned, 2,483,712 bytes; needs GNU binutils to build.
+
 ## Build
 
 Requirements: the original `winbox64.v3.43.exe` in the repo root, PowerShell
-(for patch set v1) and Python 3 (for patch sets v2–v7). Patch sets v4 and
-v7 additionally need GNU binutils (`as`/`ld`/`objcopy`, preinstalled on
-Linux; on Windows use WSL or MinGW-w64): both assemble their cave/converter
+(for patch set v1) and Python 3 (for patch sets v2–v8). Patch sets v4, v7
+and v8 additionally need GNU binutils (`as`/`ld`/`objcopy`, preinstalled on
+Linux; on Windows use WSL or MinGW-w64): they assemble their cave/converter
 blobs from the sources in the `asm/` folder themselves (v7 also loads the
 340B `icons/cmr_icons.bin` stab data). Patch set v5 needs the CMR sprite sources
 `icons/icons16/24/32-cmr.png` (committed to the repository).
@@ -342,6 +380,7 @@ python ./build-patched-v4.py  # -> winbox64.v3.43p4.exe  (v3 + bytes/bigbytes ed
 python ./build-patched-v5.py  # -> winbox64.v3.43p5.exe  (v4 + RouterOS 7.26/initial CMR support)
 python ./build-patched-v6.py  # -> winbox64.v3.43p6.exe  (v5 + WiFi/ENV fixes + ESR usability set)
 python ./build-patched-v7.py  # -> winbox64.v3.43p7.exe  (v6 + CMR improvements + dynamic title + Ping fields)
+python ./build-patched-v8.py  # -> winbox64.v3.43p8.exe  (v7 + Win7 launch + NTP/Range display + Apply fix + heap shield)
 ```
 
 Each patch set takes the previous output as its input. All
@@ -356,10 +395,10 @@ scripts:
 ## CI / Releases
 
 `.github/workflows/build-and-release.yml` runs on **every push to `master`**
-(and manually via `workflow_dispatch`): it builds all seven patch sets on an
+(and manually via `workflow_dispatch`): it builds all eight patch sets on an
 Ubuntu runner — where the real GNU assembler assembles the cave/converter
 sources from the `asm/` folder — verifies all SHA-256
-hashes, and creates seven GitHub
+hashes, and creates eight GitHub
 Releases on the first successful run (existing releases are left untouched —
 the builds are byte-deterministic, so there is nothing to update):
 
@@ -375,9 +414,12 @@ the builds are byte-deterministic, so there is nothing to update):
   only — self-contained, plus RouterOS 7.26/initial CMR support
 * **`patched-v6`** — `WinBox 3.43p6`: `winbox64.v3.43p6.exe`
   only — self-contained, plus the WiFi/ENV fixes and the ESR usability set
-* **`patched-v7`** — `WinBox 3.43p7` (marked *Latest*): `winbox64.v3.43p7.exe`
+* **`patched-v7`** — `WinBox 3.43p7`: `winbox64.v3.43p7.exe`
   only — self-contained, plus the CMR improvements, the dynamic-version
   title and the Ping/Traceroute dialog fields
+* **`patched-v8`** — `WinBox 3.43p8` (marked *Latest*): `winbox64.v3.43p8.exe`
+  only — self-contained, plus the Win7 launch fix, the NTP/Range field
+  display, the Num Set → Apply fix and the stronger heap shield
 
 ## Roadmap / TODO
 
