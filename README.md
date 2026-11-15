@@ -13,11 +13,12 @@ v6 adds the WiFi realms-raw save fix, the Container ENV TZ-widget fix
 and the ESR usability pack; v7 adds CMR improvements (the Dashboard
 free-shield and the enmbools/tags type fixes), a dynamic-version
 window title and Ping/Traceroute dialog fields; v8 adds the NTP/Range
-field display and the Num Set → Apply fix — and verify every
+field display and the Num Set → Apply fix; v9 fixes the Policy Rules red
+mark — and verify every
 result against a known-good SHA-256. Each output is **byte-identical** to the
 community-tested patched build of the corresponding lineage.
 
-This repository currently ships **patch sets v1 through v8**. The patch
+This repository currently ships **patch sets v1 through v9**. The patch
 pipeline is deterministic and self-verifying, so
 if a future RouterOS release breaks WinBox 3.43 again, further patch sets can
 be added the same way as new versions.
@@ -33,6 +34,7 @@ be added the same way as new versions.
 | `winbox64.v3.43p6.exe` (patch set v6) | `bb46e3e83cff5bbb4098aba4e7960cd7bf71bf697ff9a580762c6718206fd256` |
 | `winbox64.v3.43p7.exe` (patch set v7) | `f2e3e610618cbd0d79044d53005a679c421876b886a840c4e5f06febab5ad857` |
 | `winbox64.v3.43p8.exe` (patch set v8) | `665f7420baf57ece3d5382f446e1d57b4e4a76e751d51552eb96024c2df11fff` |
+| `winbox64.v3.43p9.exe` (patch set v9) | `6a7abd5094a8a2abc1c2c6a59e6d57a453d089695dd4000961163205d389a799` |
 
 ## Contents
 
@@ -45,6 +47,7 @@ be added the same way as new versions.
 * [Patch set v6 — WiFi realms-raw + ENV TZ widget + ESR usability set](#patch-set-v6--wifi-realms-raw--env-tz-widget--esr-usability-set)
 * [Patch set v7 — CMR improvements + dynamic title + Ping/Traceroute fields](#patch-set-v7--cmr-improvements--dynamic-title--pingtraceroute-fields)
 * [Patch set v8 — Win7 launch + NTP/Range display + Apply fix + heap shield](#patch-set-v8--win7-launch--ntprange-display--apply-fix--heap-shield)
+* [Patch set v9 — Policy Rules fix + in-memory Ping/Traceroute fields](#patch-set-v9--policy-rules-fix--in-memory-pingtraceroute-fields)
 * [Roadmap / TODO](#roadmap--todo)
 * [Build](#build)
 * [CI / Releases](#ci--releases)
@@ -362,14 +365,44 @@ size unchanged). The new caves are assembled from the `.s` sources in the
 
 Trade-offs: unsigned, 2,483,712 bytes; needs GNU binutils to build.
 
+## Patch set v9 — Policy Rules fix + in-memory Ping/Traceroute fields
+
+Patch set v9 (`build-patched-v9.py`) is built **on top of patch set v8** and
+adds the fixes below plus a version stamp (version **3.43.104.3**, file size
+unchanged, `.text` untouched — everything lives in `.wbox`). The new caves
+are assembled from the `.s` sources in the `asm/` folder:
+
+* **Policy Rules fix** — Routing → Settings → Policy Rules showed a red
+  mark on the first open (a race: the `strict:1` validation fired before
+  the chains arrived from the router; the second open was black only
+  thanks to the chain cache), and Apply with an empty string failed with
+  "Error in - selection expected!" even for a no-op. Fixed by a
+  same-length jg grammar edit: `strict:1` → `min:1`.
+* **Ping/Traceroute fields regression fixed** — in v8 the Interface/VRF
+  injections were accidentally dead code (the fopen hook had been
+  retargeted to the Range-only jgmem cave, so the fields stopped
+  rendering — a v8 regression). A unified cave now performs the Ping
+  (Interface/VRF) + Traceroute (Interface/VRF) injections in-memory,
+  piecewise-idempotently — reopening the dialogs never duplicates the
+  fields.
+* **100% in-memory jg machinery** — the dead disk-write-era stab is fully
+  cleaned (it wrote +367B of injections ON DISK, polluted the cache and
+  changed the md5); a Range pre-check activates the transformation only
+  when `bignumberrange` is really present in the buffer, and a piecewise
+  fseek correction keeps the reads coherent across the three insertions.
+  The on-disk file stays virgin (md5 before = after).
+* **Version stamp**: `3.43.104.1` → `3.43.104.3`.
+
+Trade-offs: unsigned, 2,483,712 bytes; needs GNU binutils to build.
+
 ## Build
 
 Requirements: the original `winbox64.v3.43.exe` in the repo root, PowerShell
-(for patch set v1) and Python 3 (for patch sets v2–v8). Patch sets v4, v7
-and v8 additionally need GNU binutils (`as`/`ld`/`objcopy`, preinstalled on
-Linux; on Windows use WSL or MinGW-w64): they assemble their cave/converter
-blobs from the sources in the `asm/` folder themselves (v7 also loads the
-340B `icons/cmr_icons.bin` stab data). Patch set v5 needs the CMR sprite sources
+(for patch set v1) and Python 3. Patch sets need GNU
+binutils (`as`/`ld`/`objcopy`, preinstalled on Linux; on Windows use WSL or
+MinGW-w64): they assemble their cave/converter blobs from the sources in the
+`asm/` folder themselves (v7 also loads the 340B `icons/cmr_icons.bin` stab
+data). Patch set v5 needs the CMR sprite sources
 `icons/icons16/24/32-cmr.png` (committed to the repository).
 
 ```powershell
@@ -381,6 +414,7 @@ python ./build-patched-v5.py  # -> winbox64.v3.43p5.exe  (v4 + RouterOS 7.26/ini
 python ./build-patched-v6.py  # -> winbox64.v3.43p6.exe  (v5 + WiFi/ENV fixes + ESR usability set)
 python ./build-patched-v7.py  # -> winbox64.v3.43p7.exe  (v6 + CMR improvements + dynamic title + Ping fields)
 python ./build-patched-v8.py  # -> winbox64.v3.43p8.exe  (v7 + Win7 launch + NTP/Range display + Apply fix + heap shield)
+python ./build-patched-v9.py  # -> winbox64.v3.43p9.exe  (v8 + Policy Rules fix + in-memory Ping/TR fields)
 ```
 
 Each patch set takes the previous output as its input. All
@@ -395,10 +429,10 @@ scripts:
 ## CI / Releases
 
 `.github/workflows/build-and-release.yml` runs on **every push to `master`**
-(and manually via `workflow_dispatch`): it builds all eight patch sets on an
+(and manually via `workflow_dispatch`): it builds all nine patch sets on an
 Ubuntu runner — where the real GNU assembler assembles the cave/converter
 sources from the `asm/` folder — verifies all SHA-256
-hashes, and creates eight GitHub
+hashes, and creates nine GitHub
 Releases on the first successful run (existing releases are left untouched —
 the builds are byte-deterministic, so there is nothing to update):
 
@@ -417,9 +451,12 @@ the builds are byte-deterministic, so there is nothing to update):
 * **`patched-v7`** — `WinBox 3.43p7`: `winbox64.v3.43p7.exe`
   only — self-contained, plus the CMR improvements, the dynamic-version
   title and the Ping/Traceroute dialog fields
-* **`patched-v8`** — `WinBox 3.43p8` (marked *Latest*): `winbox64.v3.43p8.exe`
+* **`patched-v8`** — `WinBox 3.43p8`: `winbox64.v3.43p8.exe`
   only — self-contained, plus the Win7 launch fix, the NTP/Range field
   display, the Num Set → Apply fix and the stronger heap shield
+* **`patched-v9`** — `WinBox 3.43p9` (marked *Latest*): `winbox64.v3.43p9.exe`
+  only — self-contained, plus the Policy Rules fix and the in-memory
+  Ping/Traceroute fields
 
 ## Roadmap / TODO
 

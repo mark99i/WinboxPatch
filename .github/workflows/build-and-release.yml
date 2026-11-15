@@ -52,6 +52,10 @@ jobs:
         shell: pwsh
         run: python ./build-patched-v8.py
 
+      - name: Patch the binary (patch set v9)
+        shell: pwsh
+        run: python ./build-patched-v9.py
+
       - name: Verify SHA-256
         shell: pwsh
         run: |
@@ -87,6 +91,10 @@ jobs:
           if ($h8 -ne '665f7420baf57ece3d5382f446e1d57b4e4a76e751d51552eb96024c2df11fff') {
             throw "patch set v8 SHA-256 mismatch: $h8"
           }
+          $h9 = (Get-FileHash ./winbox64.v3.43p9.exe -Algorithm SHA256).Hash.ToLower()
+          if ($h9 -ne '6a7abd5094a8a2abc1c2c6a59e6d57a453d089695dd4000961163205d389a799') {
+            throw "patch set v9 SHA-256 mismatch: $h9"
+          }
           "Verified v1: $h1"
           "Verified v2: $h2"
           "Verified v3: $h3"
@@ -95,6 +103,7 @@ jobs:
           "Verified v6: $h6"
           "Verified v7: $h7"
           "Verified v8: $h8"
+          "Verified v9: $h9"
 
       - name: Publish GitHub Release (patch set v1)
         shell: pwsh
@@ -286,6 +295,31 @@ jobs:
                    "no files needed next to the exe.`n" +
                    "See the README for details on what each patch does."
           $assets = @('winbox64.v3.43p8.exe')
+          if (gh release view $tag --json name -q '.name') {
+            "Release '$tag' already exists - nothing to do (build is deterministic)"
+          } else {
+            gh release create $tag @assets --title $title --notes $notes
+            if ($LASTEXITCODE -ne 0) { throw "gh release create failed for '$tag' (v8)" }
+            "Created release '$tag'"
+          }
+
+
+      - name: Publish GitHub Release (patch set v9)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag   = 'patched-v9'
+          $title = 'WinBox 3.43p9'
+          $sha   = $env:GITHUB_SHA
+          $notes = "Patch set v9 - v8 + Policy Rules fix (strict:1 -> min:1, no more red mark on the first open, Apply works without errors), v8 regression fixed: the Ping/Traceroute Interface/VRF fields render again, jg field-change machinery refactored to 100% in-memory (the on-disk file stays untouched), version stamp 3.43.104.3.`n" +
+                   "Built automatically from commit $sha.`n`n" +
+                   "winbox64.v3.43p9.exe is byte-identical to the known-good community-patched build`n" +
+                   "(SHA-256 6a7abd5094a8a2abc1c2c6a59e6d57a453d089695dd4000961163205d389a799).`n`n" +
+                   "Self-contained: icons are embedded and unpacked to %TEMP% at startup -`n" +
+                   "no files needed next to the exe.`n" +
+                   "See the README for details on what each patch does."
+          $assets = @('winbox64.v3.43p9.exe')
           if (gh release view $tag --json name -q '.name') {
             "Release '$tag' already exists - nothing to do (build is deterministic)"
           } else {
