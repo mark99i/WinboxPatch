@@ -14,11 +14,12 @@ and the ESR usability pack; v7 adds CMR improvements (the Dashboard
 free-shield and the enmbools/tags type fixes), a dynamic-version
 window title and Ping/Traceroute dialog fields; v8 adds the NTP/Range
 field display and the Num Set → Apply fix; v9 fixes the Policy Rules red
-mark — and verify every
+mark; v10 fixes the ESR number-grouping regression and a RouterOS
+7.24.5 connection handle leak — and verify every
 result against a known-good SHA-256. Each output is **byte-identical** to the
 community-tested patched build of the corresponding lineage.
 
-This repository currently ships **patch sets v1 through v9**. The patch
+This repository currently ships **patch sets v1 through v10**. The patch
 pipeline is deterministic and self-verifying, so
 if a future RouterOS release breaks WinBox 3.43 again, further patch sets can
 be added the same way as new versions.
@@ -35,6 +36,7 @@ be added the same way as new versions.
 | `winbox64.v3.43p7.exe` (patch set v7) | `f2e3e610618cbd0d79044d53005a679c421876b886a840c4e5f06febab5ad857` |
 | `winbox64.v3.43p8.exe` (patch set v8) | `665f7420baf57ece3d5382f446e1d57b4e4a76e751d51552eb96024c2df11fff` |
 | `winbox64.v3.43p9.exe` (patch set v9) | `6a7abd5094a8a2abc1c2c6a59e6d57a453d089695dd4000961163205d389a799` |
+| `winbox64.v3.43p10.exe` (patch set v10) | `448d32841bb9afa24435db7f78a650a8dfb54042c3ffef38efc94e5e9e8c2d8f` |
 
 ## Contents
 
@@ -48,6 +50,7 @@ be added the same way as new versions.
 * [Patch set v7 — CMR improvements + dynamic title + Ping/Traceroute fields](#patch-set-v7--cmr-improvements--dynamic-title--pingtraceroute-fields)
 * [Patch set v8 — Win7 launch + NTP/Range display + Apply fix + heap shield](#patch-set-v8--win7-launch--ntprange-display--apply-fix--heap-shield)
 * [Patch set v9 — Policy Rules fix + in-memory Ping/Traceroute fields](#patch-set-v9--policy-rules-fix--in-memory-pingtraceroute-fields)
+* [Patch set v10 — ESR number-grouping revert + RouterOS 7.24.5 handle leak](#patch-set-v10--esr-number-grouping-revert--routeros-7245-handle-leak)
 * [Roadmap / TODO](#roadmap--todo)
 * [Build](#build)
 * [CI / Releases](#ci--releases)
@@ -395,6 +398,36 @@ are assembled from the `.s` sources in the `asm/` folder:
 
 Trade-offs: unsigned, 2,483,712 bytes; needs GNU binutils to build.
 
+## Patch set v10 — ESR number-grouping revert + RouterOS 7.24.5 handle leak
+
+Patch set v10 (`build-patched-v10.py`) is built **on top of patch set v9**
+and adds the fixes below plus a version stamp (version **3.43.104.4**, file
+size unchanged). The new cave is assembled from the `.s` source in the
+`asm/` folder; the two ESR sites are restored byte-exact from the original
+`winbox64.v3.43.exe` (the source of truth — no hardcoded hex strings):
+
+* **ESR number-grouping regression fixed** — an old in-place replacement of
+  the common number→string converter (meant for the Stats counters only)
+  added space-grouping every 3 digits and hit **every** numeric field: the
+  Partition Offset showed "65 536" with a RED mark (validation rejects the
+  space — the stock WB4-consistent semantics), the Disks "+" button aborted
+  on `def:65536`, and Apply threw "Error — number expected!". Both ESR
+  sites (the converter body @0x46BF23, 142B, and the call site @0x46810F,
+  12B) are copied byte-exact from the original binary — the grouping is
+  gone completely (= WB4 behavior). Read-only counters ("1 176") use the
+  native wb3 path and are not touched.
+* **RouterOS 7.24.5 connection fix** — on 7.24.x the jg files carry no
+  `bignumberrange`, so the Range pre-check took its not-found branch —
+  which jumped past the CloseHandle block (0x65915A–0x659186), leaving the
+  jg file handle open → a share-lock on roteros.jg → "could not open" →
+  "Could not start plugins" → disconnect. The range pre-check cave
+  (`asm/range_marker_gate_p10.s`, @0x65A700, 65B) is reassembled with the
+  not-found jmp routed through the CloseHandle block (0x659187 →
+  0x65915A, a 1-byte change inside the rel32).
+* **Version stamp**: `3.43.104.3` → `3.43.104.4`.
+
+Trade-offs: unsigned, 2,483,712 bytes; needs GNU binutils to build.
+
 ## Build
 
 Requirements: the original `winbox64.v3.43.exe` in the repo root, PowerShell
@@ -415,6 +448,7 @@ python ./build-patched-v6.py  # -> winbox64.v3.43p6.exe  (v5 + WiFi/ENV fixes + 
 python ./build-patched-v7.py  # -> winbox64.v3.43p7.exe  (v6 + CMR improvements + dynamic title + Ping fields)
 python ./build-patched-v8.py  # -> winbox64.v3.43p8.exe  (v7 + Win7 launch + NTP/Range display + Apply fix + heap shield)
 python ./build-patched-v9.py  # -> winbox64.v3.43p9.exe  (v8 + Policy Rules fix + in-memory Ping/TR fields)
+python ./build-patched-v10.py # -> winbox64.v3.43p10.exe (v9 + ESR grouping fix + 7.24.5 connection fix)
 ```
 
 Each patch set takes the previous output as its input. All
@@ -429,10 +463,10 @@ scripts:
 ## CI / Releases
 
 `.github/workflows/build-and-release.yml` runs on **every push to `master`**
-(and manually via `workflow_dispatch`): it builds all nine patch sets on an
+(and manually via `workflow_dispatch`): it builds all ten patch sets on an
 Ubuntu runner — where the real GNU assembler assembles the cave/converter
 sources from the `asm/` folder — verifies all SHA-256
-hashes, and creates nine GitHub
+hashes, and creates ten GitHub
 Releases on the first successful run (existing releases are left untouched —
 the builds are byte-deterministic, so there is nothing to update):
 
@@ -454,9 +488,12 @@ the builds are byte-deterministic, so there is nothing to update):
 * **`patched-v8`** — `WinBox 3.43p8`: `winbox64.v3.43p8.exe`
   only — self-contained, plus the Win7 launch fix, the NTP/Range field
   display, the Num Set → Apply fix and the stronger heap shield
-* **`patched-v9`** — `WinBox 3.43p9` (marked *Latest*): `winbox64.v3.43p9.exe`
+* **`patched-v9`** — `WinBox 3.43p9`: `winbox64.v3.43p9.exe`
   only — self-contained, plus the Policy Rules fix and the in-memory
   Ping/Traceroute fields
+* **`patched-v10`** — `WinBox 3.43p10` (marked *Latest*): `winbox64.v3.43p10.exe`
+  only — self-contained, plus the ESR number-grouping revert and the
+  RouterOS 7.24.5 connection fix
 
 ## Roadmap / TODO
 

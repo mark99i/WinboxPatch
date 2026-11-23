@@ -56,6 +56,10 @@ jobs:
         shell: pwsh
         run: python ./build-patched-v9.py
 
+      - name: Patch the binary (patch set v10)
+        shell: pwsh
+        run: python ./build-patched-v10.py
+
       - name: Verify SHA-256
         shell: pwsh
         run: |
@@ -95,6 +99,10 @@ jobs:
           if ($h9 -ne '6a7abd5094a8a2abc1c2c6a59e6d57a453d089695dd4000961163205d389a799') {
             throw "patch set v9 SHA-256 mismatch: $h9"
           }
+          $h10 = (Get-FileHash ./winbox64.v3.43p10.exe -Algorithm SHA256).Hash.ToLower()
+          if ($h10 -ne '448d32841bb9afa24435db7f78a650a8dfb54042c3ffef38efc94e5e9e8c2d8f') {
+            throw "patch set v10 SHA-256 mismatch: $h10"
+          }
           "Verified v1: $h1"
           "Verified v2: $h2"
           "Verified v3: $h3"
@@ -104,6 +112,7 @@ jobs:
           "Verified v7: $h7"
           "Verified v8: $h8"
           "Verified v9: $h9"
+          "Verified v10: $h10"
 
       - name: Publish GitHub Release (patch set v1)
         shell: pwsh
@@ -320,6 +329,30 @@ jobs:
                    "no files needed next to the exe.`n" +
                    "See the README for details on what each patch does."
           $assets = @('winbox64.v3.43p9.exe')
+          if (gh release view $tag --json name -q '.name') {
+            "Release '$tag' already exists - nothing to do (build is deterministic)"
+          } else {
+            gh release create $tag @assets --title $title --notes $notes
+            if ($LASTEXITCODE -ne 0) { throw "gh release create failed for '$tag'" }
+            "Created release '$tag'"
+          }
+
+      - name: Publish GitHub Release (patch set v10)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag   = 'patched-v10'
+          $title = 'WinBox 3.43p10'
+          $sha   = $env:GITHUB_SHA
+          $notes = "Patch set v10 - v9 + ESR number-grouping regression fixed (numeric fields no longer render space-grouped as '65 536': the Partition Offset red mark, the broken Disks '+' button and the Apply 'number expected!' error are gone - the number converter is restored byte-exact from the original binary), RouterOS 7.24.5 connection fix (the Range pre-check not-found path now closes the jg file handle - no more share-lock, 'Could not start plugins' and disconnect), version stamp 3.43.104.4.`n" +
+                   "Built automatically from commit $sha.`n`n" +
+                   "winbox64.v3.43p10.exe is byte-identical to the known-good community-patched build`n" +
+                   "(SHA-256 448d32841bb9afa24435db7f78a650a8dfb54042c3ffef38efc94e5e9e8c2d8f).`n`n" +
+                   "Self-contained: icons are embedded and unpacked to %TEMP% at startup -`n" +
+                   "no files needed next to the exe.`n" +
+                   "See the README for details on what each patch does."
+          $assets = @('winbox64.v3.43p10.exe')
           if (gh release view $tag --json name -q '.name') {
             "Release '$tag' already exists - nothing to do (build is deterministic)"
           } else {
