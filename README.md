@@ -15,11 +15,12 @@ free-shield and the enmbools/tags type fixes), a dynamic-version
 window title and Ping/Traceroute dialog fields; v8 adds the NTP/Range
 field display and the Num Set → Apply fix; v9 fixes the Policy Rules red
 mark; v10 fixes the ESR number-grouping regression and a RouterOS
-7.24.5 connection handle leak — and verify every
+7.24.5 connection handle leak; v11 adds ESR grouping of read-only
+counters and a "Use UTF-8" option — and verify every
 result against a known-good SHA-256. Each output is **byte-identical** to the
 community-tested patched build of the corresponding lineage.
 
-This repository currently ships **patch sets v1 through v10**. The patch
+This repository currently ships **patch sets v1 through v11**. The patch
 pipeline is deterministic and self-verifying, so
 if a future RouterOS release breaks WinBox 3.43 again, further patch sets can
 be added the same way as new versions.
@@ -37,6 +38,7 @@ be added the same way as new versions.
 | `winbox64.v3.43p8.exe` (patch set v8) | `665f7420baf57ece3d5382f446e1d57b4e4a76e751d51552eb96024c2df11fff` |
 | `winbox64.v3.43p9.exe` (patch set v9) | `6a7abd5094a8a2abc1c2c6a59e6d57a453d089695dd4000961163205d389a799` |
 | `winbox64.v3.43p10.exe` (patch set v10) | `448d32841bb9afa24435db7f78a650a8dfb54042c3ffef38efc94e5e9e8c2d8f` |
+| `winbox64.v3.43p11.exe` (patch set v11) | `33a2e8061b589429fe25a49fec98a6ce2c75bbcef75aff96422b4f61d67144ba` |
 
 ## Contents
 
@@ -51,6 +53,7 @@ be added the same way as new versions.
 * [Patch set v8 — Win7 launch + NTP/Range display + Apply fix + heap shield](#patch-set-v8--win7-launch--ntprange-display--apply-fix--heap-shield)
 * [Patch set v9 — Policy Rules fix + in-memory Ping/Traceroute fields](#patch-set-v9--policy-rules-fix--in-memory-pingtraceroute-fields)
 * [Patch set v10 — ESR number-grouping revert + RouterOS 7.24.5 handle leak](#patch-set-v10--esr-number-grouping-revert--routeros-7245-handle-leak)
+* [Patch set v11 — ESR counter grouping + Use UTF-8 option](#patch-set-v11--esr-counter-grouping--use-utf-8-option)
 * [Roadmap / TODO](#roadmap--todo)
 * [Build](#build)
 * [CI / Releases](#ci--releases)
@@ -428,6 +431,46 @@ size unchanged). The new cave is assembled from the `.s` source in the
 
 Trade-offs: unsigned, 2,483,712 bytes; needs GNU binutils to build.
 
+## Patch set v11 — ESR counter grouping + Use UTF-8 option
+
+Patch set v11 (`build-patched-v11.py`) is built **on top of patch set v10**
+and adds the features below plus a version stamp (version **3.43.104.5**,
+file size unchanged; the .text ESR sites stay virgin — only the seven
+utf8e hook sites, ≤6B each, are touched in .text). The new caves are
+assembled from the `.s` sources in the `asm/` folder:
+
+* **ESR grouping of read-only counters** — a single `.rdata` vtable slot
+  swap (0x596CE0, the plain-u64 type slot) redirects the number→string
+  conversion to a new cave (`asm/esrc_conv.s`, 136B @0x65B500): a div-10
+  loop, digit groups of 3, a space separator, the full u64 range,
+  negatives handled exactly like the stock formatter. Read Ops 8.6e9
+  renders as "8 589 934 747". Unlike the v10 ESR revert (which removed
+  the grouping from every field to fix the editable-field regression),
+  this targets the u64 type slot only — the read-only counters get the
+  grouping back with **zero .text edits** (the old formatter and its
+  thunk become dead code, left untouched).
+* **"Use UTF-8" option** — a compatibility layer for the non-English data
+  WinBox 4 writes: WB4 stores Russian list comments and WiFi names as
+  UTF-8, which stock WB3 (an ACP/cp1251 application) renders as mojibake
+  and sends back mangled. With the option ON the client converts at the
+  M2 boundary — UTF-8→ACP on receive, ACP→UTF-8 on send — so a Russian
+  comment left in WinBox 4 becomes readable and a Russian WiFi SSID
+  reaches the router as proper UTF-8. OFF by default = byte-for-byte
+  stock behavior (`asm/utf8_option.s`, a 1555B cave @0x65B600 + seven
+  .text hooks, 25B total):
+  * receive: UTF-8→ACP on the way into the model (storage_conv, a hook
+    in the M2 value decoder) — the whole model (the list, dialog boxes,
+    send defaults) sees a consistent ACP;
+  * send native-edit: ACP→UTF-8 after GetWindowTextA (conv_gwta; the
+    edit-field reserve is doubled by stub_dblres);
+  * send canvas: ACP→UTF-8 (cf286_hook, gated by the caller return
+    address) — covers the WiFi SSID and other canvas field editors;
+  * menu: a "Use UTF-8" checkbox (id 0x99A) + utf8.dat persistence in
+    the profile folder.
+* **Version stamp**: `3.43.104.4` → `3.43.104.5`.
+
+Trade-offs: unsigned, 2,483,712 bytes; needs GNU binutils to build.
+
 ## Build
 
 Requirements: the original `winbox64.v3.43.exe` in the repo root, PowerShell
@@ -449,6 +492,7 @@ python ./build-patched-v7.py  # -> winbox64.v3.43p7.exe  (v6 + CMR improvements 
 python ./build-patched-v8.py  # -> winbox64.v3.43p8.exe  (v7 + Win7 launch + NTP/Range display + Apply fix + heap shield)
 python ./build-patched-v9.py  # -> winbox64.v3.43p9.exe  (v8 + Policy Rules fix + in-memory Ping/TR fields)
 python ./build-patched-v10.py # -> winbox64.v3.43p10.exe (v9 + ESR grouping fix + 7.24.5 connection fix)
+python ./build-patched-v11.py # -> winbox64.v3.43p11.exe (v10 + ESR counter grouping + Use UTF-8 option)
 ```
 
 Each patch set takes the previous output as its input. All
@@ -463,10 +507,10 @@ scripts:
 ## CI / Releases
 
 `.github/workflows/build-and-release.yml` runs on **every push to `master`**
-(and manually via `workflow_dispatch`): it builds all ten patch sets on an
+(and manually via `workflow_dispatch`): it builds all eleven patch sets on an
 Ubuntu runner — where the real GNU assembler assembles the cave/converter
 sources from the `asm/` folder — verifies all SHA-256
-hashes, and creates ten GitHub
+hashes, and creates eleven GitHub
 Releases on the first successful run (existing releases are left untouched —
 the builds are byte-deterministic, so there is nothing to update):
 
@@ -491,9 +535,12 @@ the builds are byte-deterministic, so there is nothing to update):
 * **`patched-v9`** — `WinBox 3.43p9`: `winbox64.v3.43p9.exe`
   only — self-contained, plus the Policy Rules fix and the in-memory
   Ping/Traceroute fields
-* **`patched-v10`** — `WinBox 3.43p10` (marked *Latest*): `winbox64.v3.43p10.exe`
+* **`patched-v10`** — `WinBox 3.43p10`: `winbox64.v3.43p10.exe`
   only — self-contained, plus the ESR number-grouping revert and the
   RouterOS 7.24.5 connection fix
+* **`patched-v11`** — `WinBox 3.43p11` (marked *Latest*): `winbox64.v3.43p11.exe`
+  only — self-contained, plus the ESR grouping of read-only counters and
+  the "Use UTF-8" option
 
 ## Roadmap / TODO
 
