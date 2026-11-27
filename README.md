@@ -207,11 +207,6 @@ the builds are byte-deterministic, so there is nothing to update):
 Known remaining issues in the patched client — candidates for a future
 patch set:
 
-* **WB4 (WinBox 4.x) Channel 6 protocol** — the new session protocol of
-  WinBox 4: an 8-state machine, a hello with the username,
-  challenge-response, curve25519-like cryptography (32B ephemeral
-  keys), HMAC (20B key) + cipher (16B key), encryption from the very
-  first byte and a 24-sessions-per-user limit.
 * **CMR component (RouterOS 7.26+)**:
   - implement the `bargraph` field type;
   - implement `topolayout`;
